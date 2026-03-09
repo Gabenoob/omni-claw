@@ -77,6 +77,8 @@ pub const Planner = struct {
 
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response, .{});
         defer parsed.deinit();
+        
+        if (parsed.value != .object) return error.InvalidOmniRlmResponse;
 
         const obj = parsed.value.object;
         const tool_value = obj.get("tool") orelse return error.InvalidOmniRlmResponse;
