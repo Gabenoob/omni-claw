@@ -26,10 +26,27 @@ pub const Planner = struct {
         const lowered = try std.ascii.allocLowerString(self.allocator, prompt);
         defer self.allocator.free(lowered);
 
-        if (std.mem.indexOf(u8, lowered, "search") != null or std.mem.indexOf(u8, lowered, "find") != null)
-            return Plan{ .tool = try self.allocator.dupe(u8, "web_search"), .argument = prompt };
+        if (std.mem.indexOf(u8, lowered, "search") != null or std.mem.indexOf(u8, lowered, "find") != null) {
+            if (toolExists("web_search"))
+                return Plan{ .tool = try self.allocator.dupe(u8, "web_search"), .argument = prompt };
+
+            return Plan{ .tool = try self.allocator.dupe(u8, "echo"), .argument = prompt };
+        }
 
         return Plan{ .tool = try self.allocator.dupe(u8, "echo"), .argument = prompt };
+    }
+
+    fn toolExists(tool: []const u8) bool {
+        const manifest_path = std.fmt.allocPrint(std.heap.page_allocator, "plugins/{s}/manifest.json", .{tool}) catch {
+            return false;
+        };
+        defer std.heap.page_allocator.free(manifest_path);
+
+        std.fs.cwd().access(manifest_path, .{}) catch {
+            return false;
+        };
+
+        return true;
     }
 
     fn queryOmniRlm(self: *Planner, prompt: []const u8) ![]const u8 {
@@ -77,7 +94,7 @@ pub const Planner = struct {
 
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response, .{});
         defer parsed.deinit();
-        
+
         if (parsed.value != .object) return error.InvalidOmniRlmResponse;
 
         const obj = parsed.value.object;
