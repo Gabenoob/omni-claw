@@ -15,10 +15,6 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    // comment these for now until libraries are installed
-    // exe.linkSystemLibrary("sqlite3");
-    // exe.linkSystemLibrary("wasmtime");
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
