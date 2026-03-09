@@ -20,6 +20,10 @@ pub const Agent = struct {
         self.planner.deinit();
     }
 
+    pub fn configureLlmConnection(self: *Agent, base_url: []const u8, api_key: ?[]const u8) !void {
+        try self.planner.setConnectionConfig(base_url, api_key);
+    }
+
     pub fn runPrompt(self: *Agent, prompt: []const u8) !void {
         const plan = try self.planner.plan(prompt);
         defer self.allocator.free(plan.tool);
