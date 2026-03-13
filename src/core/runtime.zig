@@ -35,7 +35,7 @@ pub const Runtime = struct {
         std.debug.print("OmniClaw-Zig-RLM runtime started\n", .{});
 
         try self.handleConfiguration();
-        try Repl.run(&self.agent);
+        try Repl.run(self.agent);
     }
 
     // =========================================================================

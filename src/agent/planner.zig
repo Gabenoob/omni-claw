@@ -15,7 +15,7 @@ const TOOLS_MD_PATH = "/Users/gabe/Desktop/HUAWEI/omni-claw/src/tools/tools.md";
 const TOOLS_DOCS_DIR = "src/tools/docs/";
 
 const STAGE1_SYSTEM_PROMPT =
-    \\You are openclaw, an AI agent assistant. Your task is to analyze user requests and select the appropriate tool to execute.
+    \\You are omniclaw, an AI agent assistant. Your task is to analyze user requests and select the appropriate tool to execute.
     \\
     \\Available tools:
     \\{s}
