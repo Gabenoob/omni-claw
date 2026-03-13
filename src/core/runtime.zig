@@ -39,6 +39,16 @@ pub const Config = struct {
         try writer.writeAll(self.model_name);
         try writer.writeAll("\n");
     }
+
+    pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
+        // These slices are allocated with allocator.dupe in this module,
+        // so we can safely free them here.
+        allocator.free(@constCast(self.base_url));
+        if (self.api_key) |key| {
+            allocator.free(@constCast(key));
+        }
+        allocator.free(@constCast(self.model_name));
+    }
 };
 
 pub const Runtime = struct {
@@ -63,7 +73,7 @@ pub const Runtime = struct {
         try self.copyToolsDir();
 
         try std.process.changeCurDir(OMNICLAW_DIR);
-        try Repl.run(self.agent);
+        try Repl.run(&self.agent);
     }
 
     // =========================================================================
@@ -133,6 +143,7 @@ pub const Runtime = struct {
         try stdout_file.writeAll(default_url);
         try stdout_file.writeAll("\n  Enter URL (or press Enter for default): ");
         const base_url_input = try readLineAlloc(self.allocator, 1024);
+        defer self.allocator.free(base_url_input);
         const base_url = if (base_url_input.len == 0) default_url else base_url_input;
 
         // Step 3: API Key (for hosted APIs)
@@ -141,6 +152,7 @@ pub const Runtime = struct {
         if (use_hosted) {
             try stdout_file.writeAll("\nAPI key (required for hosted APIs): ");
             const api_key_input = try readLineAlloc(self.allocator, 1024);
+            defer self.allocator.free(api_key_input);
             if (api_key_input.len == 0) {
                 self.allocator.free(api_key_input);
                 try stdout_file.writeAll("Warning: No API key provided.\n");
@@ -157,6 +169,7 @@ pub const Runtime = struct {
         try stdout_file.writeAll("\n");
         try stdout_file.writeAll("  Enter model (or press Enter for default): ");
         const model_input = try readLineAlloc(self.allocator, 256);
+        defer self.allocator.free(model_input);
         const model_name = if (model_input.len == 0) default_model else model_input;
 
         // Create .omniclaw directory and save configuration

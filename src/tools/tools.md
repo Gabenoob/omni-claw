@@ -6,8 +6,8 @@ This document lists all available tools in the Omni-Claw system.
 
 | Tool Name | Category | Description | Doc Path |
 |-----------|----------|-------------|----------|
-| exec | system | Execute bash commands in the current environment | src/tools/docs/exec.md |
-| finish | control | Provide final answer and complete the task | src/tools/docs/finish.md |
+| exec | system | Execute bash commands in the current environment | tools/docs/exec.md |
+| finish | control | Provide final answer and complete the task | tools/docs/finish.md |
 
 ---
 
@@ -28,5 +28,5 @@ When analyzing a user request, consider:
 
 Respond with ONLY a JSON object:
 
-{"tool":"<tool_name>","reasoning":"<brief explanation>"}
+ {"tool":"<tool_name>","argument":"<brief explanation or arguments>"}
 

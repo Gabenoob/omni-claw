@@ -47,7 +47,7 @@ pub const Agent = struct {
             .model_name = try self.allocator.dupe(u8, config.model_name),
         };
 
-        try self.planner.setConnectionConfig(config);
+        try self.planner.setConnectionConfig(self.config.?);
     }
 
     pub fn printConfig(self: *Agent) !void {
@@ -88,8 +88,6 @@ pub const Agent = struct {
 
         try stdout_file.writeAll("\n=======================\n\n");
     }
-
-
 
     pub fn runPrompt(self: *Agent, prompt: []const u8) !void {
         // Initialize conversation

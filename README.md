@@ -124,7 +124,6 @@ Model name:
   Default: gpt-4
   Enter model (or press Enter for default): kimi-k2.5
 
-Daytona API key (optional, press Enter to skip):
 
 ✓ Configuration saved to .omniclaw/.env
 ```

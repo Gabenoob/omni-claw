@@ -123,7 +123,7 @@ pub const Planner = struct {
     pub fn setConnectionConfig(self: *Planner, config: Config) !void {
         self.model = ModelHandler{
             .base_url = config.base_url,
-            .api_key = config.api_key.?,
+            .api_key = config.api_key orelse "",
             .model_name = config.model_name,
         };
     }
@@ -141,7 +141,7 @@ pub const Planner = struct {
         // Add system prompt
         const system_prompt = try build_system_prompt(self.allocator);
         try self.messages.append(self.allocator, Message{
-            .role = "system",
+            .role = try self.allocator.dupe(u8, "system"),
             .content = system_prompt,
         });
 
@@ -150,7 +150,7 @@ pub const Planner = struct {
 
         // Add user prompt
         try self.messages.append(self.allocator, Message{
-            .role = "user",
+            .role = try self.allocator.dupe(u8, "user"),
             .content = try self.allocator.dupe(u8, prompt),
         });
 
@@ -318,7 +318,8 @@ pub const Planner = struct {
 
     /// Add tool result to message history
     pub fn addToolResult(self: *Planner, tool_name: []const u8, result_output: []const u8, success: bool) !void {
-        const content = try std.fmt.allocPrint(self.allocator,
+        const content = try std.fmt.allocPrint(
+            self.allocator,
             "Tool '{s}' executed. Success: {}. Result: {s}",
             .{ tool_name, success, result_output },
         );

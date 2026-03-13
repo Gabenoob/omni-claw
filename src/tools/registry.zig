@@ -102,35 +102,24 @@ fn execBash(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
 
     std.debug.print("$ {s}\n", .{argument});
 
-    var child = std.process.Child.init(
-        &.{ "bash", "-c", argument },
-        allocator,
-    );
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    const max_output_bytes: usize = 1024 * 1024;
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "bash", "-c", argument },
+        .max_output_bytes = max_output_bytes,
+    });
 
-    try child.spawn();
-
-    // Read stdout
-    var stdout_buf: [1024 * 1024]u8 = undefined;
-    const stdout_len = try child.stdout.?.readAll(&stdout_buf);
-    const stdout = stdout_buf[0..stdout_len];
-
-    // Read stderr
-    var stderr_buf: [1024 * 1024]u8 = undefined;
-    const stderr_len = try child.stderr.?.readAll(&stderr_buf);
-    const stderr = stderr_buf[0..stderr_len];
-
-    const term = try child.wait();
+    const stdout = result.stdout;
+    const stderr = result.stderr;
+    const term = result.term;
 
     var output: std.ArrayList(u8) = .empty;
     defer output.deinit(allocator);
 
-    if (stdout_len > 0) {
+    if (stdout.len > 0) {
         try output.appendSlice(allocator, stdout);
     }
-    if (stderr_len > 0) {
+    if (stderr.len > 0) {
         if (output.items.len > 0) try output.appendSlice(allocator, "\n");
         try output.appendSlice(allocator, "stderr: ");
         try output.appendSlice(allocator, stderr);

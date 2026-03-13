@@ -105,7 +105,7 @@ The `exec` tool allows execution of arbitrary bash commands. This is the primary
 
 ## Notes
 
-- The working directory is the Omni-Claw project root
+ - Commands run with the working directory set to the `.omniclaw` directory inside the project root (use absolute paths or `..` to access files in the project root)
 - Environment variables from `.omniclaw/.env` are available
 - Output is displayed directly to the user
 - Errors are displayed on stderr

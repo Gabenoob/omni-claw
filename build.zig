@@ -6,6 +6,18 @@ pub fn build(b: *std.Build) void {
     const rlm = b.dependency("Omni_RLM", .{});
     const test_filters = b.option([]const u8, "test-filter", "Comma-separated list of test filters to run");
 
+    var filter_list: std.ArrayList([]const u8) = .empty;
+    if (test_filters) |filters| {
+        var it = std.mem.tokenizeScalar(u8, filters, ',');
+        while (it.next()) |token| {
+            const trimmed = std.mem.trim(u8, token, " \t\r\n");
+            if (trimmed.len != 0) {
+                filter_list.append(b.allocator, trimmed) catch @panic("Out of memory while parsing test filters");
+            }
+        }
+    }
+    const filter_slice = filter_list.toOwnedSlice(b.allocator) catch @panic("Out of memory while finalizing test filters");
+
     const exe = b.addExecutable(.{
         .name = "omniclaw",
         .root_module = b.createModule(.{
@@ -32,7 +44,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "omni-rlm", .module = rlm.module("omni-rlm") },
             },
         }),
-        .filters = &.{test_filters orelse ""},
+        .filters = filter_slice,
     });
 
     const test_artifact = b.addRunArtifact(test_comp);

@@ -7,8 +7,8 @@ const MAX_LINE_LEN = 2048;
 // UTF-8 character state for multi-byte character handling
 const Utf8State = struct {
     buf: [4]u8 = undefined,
-    len: u3 = 0,      // expected total bytes
-    count: u3 = 0,   // current bytes received
+    len: u3 = 0, // expected total bytes
+    count: u3 = 0, // current bytes received
 
     fn reset(self: *Utf8State) void {
         self.len = 0;
@@ -64,7 +64,7 @@ const Utf8State = struct {
 
 pub const Repl = struct {
     allocator: std.mem.Allocator,
-    agent: Agent,
+    agent: *Agent,
     stdin: std.fs.File,
     stdout: std.fs.File,
 
@@ -77,7 +77,7 @@ pub const Repl = struct {
     history: std.ArrayList([]const u8),
     history_pos: ?usize,
 
-    pub fn init(allocator: std.mem.Allocator, agent: Agent) Repl {
+    pub fn init(allocator: std.mem.Allocator, agent: *Agent) Repl {
         return .{
             .allocator = allocator,
             .agent = agent,
@@ -272,7 +272,7 @@ pub const Repl = struct {
         try self.stdout.writeAll("\r\x1b[K> ");
         // Write the entire line content
         try self.stdout.writeAll(self.line_buf[0..self.line_len]);
-        
+
         // Now position cursor correctly - go to end then move back
         // We need to calculate display width of characters after cursor
         const bytes_after = self.line_len - self.cursor_pos;
@@ -281,8 +281,8 @@ pub const Repl = struct {
             // we use a different approach: go to start and move forward
             // But that's complex with variable-width characters.
             // Instead: clear and redraw with cursor at end of visible portion
-            
-            // Actually, simpler approach: go to start of line (\r), 
+
+            // Actually, simpler approach: go to start of line (\r),
             // write prompt + content up to cursor, then we're done
             try self.stdout.writeAll("\r> ");
             try self.stdout.writeAll(self.line_buf[0..self.cursor_pos]);
@@ -489,7 +489,7 @@ fn disableRawMode(stdin: std.fs.File, original: Termios) !void {
 }
 
 // Public API for backward compatibility
-pub fn run(agent: Agent) !void {
+pub fn run(agent: *Agent) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 

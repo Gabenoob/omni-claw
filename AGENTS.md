@@ -20,8 +20,7 @@ Omni-Claw provides an AI agent architecture where:
 - **Language**: Zig 0.15.1 (pinned via `.mise.toml`)
 - **Build System**: Zig build system (`build.zig` + `build.zig.zon`)
 - **External Dependencies**:
-  - `Omni_RLM` (v0.1.0) - Planning/reasoning library from Open-Model-Initiative
-- **HTTP Client**: Via Omni-RLM library (OpenAI-compatible API)
+   - `Omni_RLM` (v0.0.0, pinned via `v_temp.tar.gz` in `build.zig.zon`) - Planning/reasoning library from Open-Model-Initiative- **HTTP Client**: Via Omni-RLM library (OpenAI-compatible API)
 - **Tool Execution**: Direct bash execution (via `std.process.Child`)
 
 ## Architecture
@@ -302,7 +301,7 @@ pub const Tool = struct {
     executor: ToolExecutor,
 };
 
-pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, argument: []const u8) anyerror!void;
+ pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, argument: []const u8) anyerror!ToolResult;
 ```
 
 ### Adding New Tools
