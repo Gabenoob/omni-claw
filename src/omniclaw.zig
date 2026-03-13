@@ -12,14 +12,14 @@ pub const Config = @import("core/runtime.zig").Config;
 pub const Agent = @import("agent/mod.zig").Agent;
 pub const Planner = @import("agent/planner.zig").Planner;
 pub const Plan = @import("agent/planner.zig").Plan;
-pub const Executor = @import("agent/executor.zig").Executor;
 
-pub const Repl = @import("transport/repl.zig");
+pub const Repl = @import("channel/repl.zig");
 
 // Tools registry
 pub const tools = struct {
     pub const Registry = @import("tools/registry.zig").ToolRegistry;
     pub const Tool = @import("tools/registry.zig").Tool;
+    pub const ToolExecutor = @import("tools/registry.zig").ToolExecutor;
     pub const createDefaultRegistry = @import("tools/registry.zig").createDefaultRegistry;
 };
 

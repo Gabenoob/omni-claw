@@ -3,3 +3,4 @@ zig-out/
 *.o
 logs
 .env
+.DS_Store

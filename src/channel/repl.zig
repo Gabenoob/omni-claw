@@ -4,6 +4,64 @@ const Agent = @import("../agent/mod.zig").Agent;
 const MAX_HISTORY = 100;
 const MAX_LINE_LEN = 2048;
 
+// UTF-8 character state for multi-byte character handling
+const Utf8State = struct {
+    buf: [4]u8 = undefined,
+    len: u3 = 0,      // expected total bytes
+    count: u3 = 0,   // current bytes received
+
+    fn reset(self: *Utf8State) void {
+        self.len = 0;
+        self.count = 0;
+    }
+
+    fn isComplete(self: Utf8State) bool {
+        return self.len > 0 and self.count == self.len;
+    }
+
+    fn feed(self: *Utf8State, byte: u8) ?[]const u8 {
+        // Start of a new UTF-8 sequence
+        if (self.count == 0) {
+            if (byte < 0x80) {
+                // ASCII - single byte
+                self.buf[0] = byte;
+                return self.buf[0..1];
+            } else if ((byte & 0xE0) == 0xC0) {
+                // 2-byte sequence: 110xxxxx
+                self.len = 2;
+            } else if ((byte & 0xF0) == 0xE0) {
+                // 3-byte sequence: 1110xxxx (Chinese usually here)
+                self.len = 3;
+            } else if ((byte & 0xF8) == 0xF0) {
+                // 4-byte sequence: 11110xxx
+                self.len = 4;
+            } else {
+                // Invalid start byte, treat as single byte
+                self.buf[0] = byte;
+                return self.buf[0..1];
+            }
+            self.buf[0] = byte;
+            self.count = 1;
+            return null; // Need more bytes
+        } else {
+            // Continuation byte: 10xxxxxx
+            if ((byte & 0xC0) != 0x80) {
+                // Invalid continuation, reset and treat as new start
+                self.reset();
+                return self.feed(byte);
+            }
+            self.buf[self.count] = byte;
+            self.count += 1;
+            if (self.count == self.len) {
+                const result = self.buf[0..self.len];
+                self.reset();
+                return result;
+            }
+            return null; // Need more bytes
+        }
+    }
+};
+
 pub const Repl = struct {
     allocator: std.mem.Allocator,
     agent: Agent,
@@ -48,6 +106,7 @@ pub const Repl = struct {
         while (true) {
             try self.stdout.writeAll("> ");
             self.resetLine();
+            var utf8_state = Utf8State{};
 
             while (true) {
                 var byte: [1]u8 = undefined;
@@ -58,6 +117,8 @@ pub const Repl = struct {
 
                 // Handle escape sequences (arrow keys, etc.)
                 if (key == '\x1b') {
+                    // Cancel any pending UTF-8 sequence when ESC is pressed
+                    utf8_state.reset();
                     const seq = try self.readEscapeSequence();
                     switch (seq) {
                         .up => try self.handleHistoryUp(),
@@ -75,19 +136,38 @@ pub const Repl = struct {
                 // Handle control characters
                 switch (key) {
                     '\n', '\r' => {
+                        utf8_state.reset();
                         try self.stdout.writeAll("\n");
                         break;
                     },
                     '\x03' => return, // Ctrl+C
                     '\x04' => return, // Ctrl+D
-                    '\x7f' => try self.backspace(), // Backspace
-                    0x01 => try self.moveCursorHome(), // Ctrl+A
-                    0x05 => try self.moveCursorEnd(), // Ctrl+E
-                    0x0b => try self.clearToEnd(), // Ctrl+K
-                    0x15 => try self.clearLine(), // Ctrl+U
+                    '\x7f' => {
+                        utf8_state.reset();
+                        try self.backspace();
+                    }, // Backspace
+                    0x01 => {
+                        utf8_state.reset();
+                        try self.moveCursorHome();
+                    }, // Ctrl+A
+                    0x05 => {
+                        utf8_state.reset();
+                        try self.moveCursorEnd();
+                    }, // Ctrl+E
+                    0x0b => {
+                        utf8_state.reset();
+                        try self.clearToEnd();
+                    }, // Ctrl+K
+                    0x15 => {
+                        utf8_state.reset();
+                        try self.clearLine();
+                    }, // Ctrl+U
                     else => {
-                        if (key >= 32 and key <= 126) {
-                            try self.insertChar(key);
+                        // Accept all non-control characters (>= 32) as potential UTF-8
+                        if (key >= 32) {
+                            if (utf8_state.feed(key)) |utf8_char| {
+                                try self.insertUtf8Char(utf8_char);
+                            }
                         }
                     },
                 }
@@ -103,6 +183,10 @@ pub const Repl = struct {
             if (std.mem.eql(u8, line, "/exit") or std.mem.eql(u8, line, "/quit")) return;
             if (std.mem.eql(u8, line, "/config")) {
                 try self.agent.printConfig();
+                continue;
+            }
+            if (std.mem.eql(u8, line, "/tools")) {
+                try self.agent.printTools();
                 continue;
             }
 
@@ -161,120 +245,146 @@ pub const Repl = struct {
         }
     }
 
-    fn insertChar(self: *Repl, c: u8) !void {
-        if (self.line_len >= MAX_LINE_LEN) return;
+    fn insertUtf8Char(self: *Repl, utf8_char: []const u8) !void {
+        if (self.line_len + utf8_char.len > MAX_LINE_LEN) return;
+        const char_len = utf8_char.len;
 
         // Make room if inserting in the middle
         if (self.cursor_pos < self.line_len) {
             var i = self.line_len;
             while (i > self.cursor_pos) : (i -= 1) {
-                self.line_buf[i] = self.line_buf[i - 1];
+                self.line_buf[i + char_len - 1] = self.line_buf[i - 1];
             }
         }
 
-        self.line_buf[self.cursor_pos] = c;
-        self.line_len += 1;
+        // Insert the UTF-8 character
+        @memcpy(self.line_buf[self.cursor_pos..][0..char_len], utf8_char);
+        self.line_len += char_len;
+        self.cursor_pos += char_len;
 
-        // Echo the character to stdout (raw mode has echo disabled)
-        try self.stdout.writeAll(&.{c});
+        // Redraw entire line to handle display width correctly
+        try self.redrawLine();
+    }
 
-        self.cursor_pos += 1;
-
-        // If there are characters after cursor, redraw them and move cursor back
-        if (self.cursor_pos < self.line_len) {
-            try self.stdout.writeAll(self.line_buf[self.cursor_pos..self.line_len]);
-
-            // Move cursor back to correct position
-            const chars_after = self.line_len - self.cursor_pos;
-            var buf: [32]u8 = undefined;
-            const esc = try std.fmt.bufPrint(&buf, "\x1b[{}D", .{chars_after});
-            try self.stdout.writeAll(esc);
+    // Redraw the entire current line with cursor at correct position
+    fn redrawLine(self: *Repl) !void {
+        // Move to start of line and clear it, then redraw prompt
+        try self.stdout.writeAll("\r\x1b[K> ");
+        // Write the entire line content
+        try self.stdout.writeAll(self.line_buf[0..self.line_len]);
+        
+        // Now position cursor correctly - go to end then move back
+        // We need to calculate display width of characters after cursor
+        const bytes_after = self.line_len - self.cursor_pos;
+        if (bytes_after > 0) {
+            // To position cursor correctly without knowing display widths,
+            // we use a different approach: go to start and move forward
+            // But that's complex with variable-width characters.
+            // Instead: clear and redraw with cursor at end of visible portion
+            
+            // Actually, simpler approach: go to start of line (\r), 
+            // write prompt + content up to cursor, then we're done
+            try self.stdout.writeAll("\r> ");
+            try self.stdout.writeAll(self.line_buf[0..self.cursor_pos]);
         }
+    }
+
+    // Get the byte length of the UTF-8 character ending at position 'pos'
+    fn getPrevUtf8CharLen(self: *Repl, pos: usize) usize {
+        if (pos == 0) return 0;
+        // Scan backwards to find the start of the UTF-8 character
+        var i: usize = pos - 1;
+        // Look for a start byte (not 10xxxxxx pattern)
+        while (i > 0 and (self.line_buf[i] & 0xC0) == 0x80) {
+            i -= 1;
+        }
+        // Check if it's a valid start byte
+        if ((self.line_buf[i] & 0xC0) == 0x80) {
+            // Invalid - should not happen in valid UTF-8, but handle gracefully
+            return pos - i;
+        }
+        return pos - i;
     }
 
     fn backspace(self: *Repl) !void {
         if (self.cursor_pos == 0) return;
 
-        // Move cursor left first
-        try self.stdout.writeAll("\x1b[D");
-        self.cursor_pos -= 1;
+        // Find the start of the previous UTF-8 character
+        const char_len = self.getPrevUtf8CharLen(self.cursor_pos);
+        if (char_len == 0) return;
 
-        // Shift characters left
+        self.cursor_pos -= char_len;
+
+        // Shift remaining characters left
         var i = self.cursor_pos;
-        while (i < self.line_len - 1) : (i += 1) {
-            self.line_buf[i] = self.line_buf[i + 1];
+        while (i < self.line_len - char_len) : (i += 1) {
+            self.line_buf[i] = self.line_buf[i + char_len];
         }
 
-        self.line_len -= 1;
+        self.line_len -= char_len;
 
-        // Redraw from cursor and clear the last character
-        try self.redrawFromCursor();
-        try self.stdout.writeAll(" ");
+        // Redraw entire line
+        try self.redrawLine();
+    }
 
-        // Move cursor back to the correct position
-        if (self.cursor_pos < self.line_len) {
-            const chars_after = self.line_len - self.cursor_pos + 1; // +1 for the space we just wrote
-            var buf: [32]u8 = undefined;
-            const esc = try std.fmt.bufPrint(&buf, "\x1b[{}D", .{chars_after});
-            try self.stdout.writeAll(esc);
-        } else {
-            // At end of line, just move back one for the space
-            try self.stdout.writeAll("\x1b[D");
-        }
+    // Get the byte length of the UTF-8 character starting at position 'pos'
+    fn getUtf8CharLen(self: *Repl, pos: usize) usize {
+        if (pos >= self.line_len) return 0;
+        const first_byte = self.line_buf[pos];
+        if (first_byte < 0x80) return 1;
+        if ((first_byte & 0xE0) == 0xC0) return 2;
+        if ((first_byte & 0xF0) == 0xE0) return 3;
+        if ((first_byte & 0xF8) == 0xF0) return 4;
+        return 1; // Invalid, treat as single byte
     }
 
     fn deleteChar(self: *Repl) !void {
         if (self.cursor_pos >= self.line_len) return;
 
+        // Find the byte length of the character at cursor
+        const char_len = self.getUtf8CharLen(self.cursor_pos);
+        if (char_len == 0) return;
+
+        // Shift remaining characters left
         var i = self.cursor_pos;
-        while (i < self.line_len - 1) : (i += 1) {
-            self.line_buf[i] = self.line_buf[i + 1];
+        while (i < self.line_len - char_len) : (i += 1) {
+            self.line_buf[i] = self.line_buf[i + char_len];
         }
 
-        self.line_len -= 1;
-        try self.redrawFromCursor();
-        try self.stdout.writeAll(" ");
+        self.line_len -= char_len;
 
-        // Move cursor back to the correct position
-        if (self.cursor_pos < self.line_len) {
-            const chars_after = self.line_len - self.cursor_pos + 1; // +1 for the space we just wrote
-            var buf: [32]u8 = undefined;
-            const esc = try std.fmt.bufPrint(&buf, "\x1b[{}D", .{chars_after});
-            try self.stdout.writeAll(esc);
-        } else {
-            // At end of line, just move back one for the space
-            try self.stdout.writeAll("\x1b[D");
-        }
+        // Redraw entire line
+        try self.redrawLine();
     }
 
     fn moveCursorLeft(self: *Repl) !void {
         if (self.cursor_pos == 0) return;
-        self.cursor_pos -= 1;
-        try self.stdout.writeAll("\x1b[D");
+        // Move by one UTF-8 character (may be multiple bytes)
+        const char_len = self.getPrevUtf8CharLen(self.cursor_pos);
+        if (char_len == 0) return;
+        self.cursor_pos -= char_len;
+        try self.redrawLine();
     }
 
     fn moveCursorRight(self: *Repl) !void {
         if (self.cursor_pos >= self.line_len) return;
-        self.cursor_pos += 1;
-        try self.stdout.writeAll("\x1b[C");
+        // Move by one UTF-8 character (may be multiple bytes)
+        const char_len = self.getUtf8CharLen(self.cursor_pos);
+        if (char_len == 0) return;
+        self.cursor_pos += char_len;
+        try self.redrawLine();
     }
 
     fn moveCursorHome(self: *Repl) !void {
         if (self.cursor_pos == 0) return;
-        const move = self.cursor_pos;
-        var buf: [32]u8 = undefined;
-        const esc = try std.fmt.bufPrint(&buf, "\x1b[{}D", .{move});
-        try self.stdout.writeAll(esc);
         self.cursor_pos = 0;
+        try self.redrawLine();
     }
 
     fn moveCursorEnd(self: *Repl) !void {
         if (self.cursor_pos >= self.line_len) return;
-        const move = self.line_len - self.cursor_pos;
-        var buf: [32]u8 = undefined;
-        const esc = try std.fmt.bufPrint(&buf, "\x1b[{}C", .{move});
-        try self.stdout.writeAll(esc);
         self.cursor_pos = self.line_len;
+        try self.redrawLine();
     }
 
     fn clearToEnd(self: *Repl) !void {

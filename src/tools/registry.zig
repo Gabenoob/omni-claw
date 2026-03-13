@@ -41,17 +41,25 @@ pub const ToolRegistry = struct {
         return self.tools.contains(name);
     }
 
-    /// Get list of all tool names (caller must free the returned slice)
-    pub fn listToolNames(self: *ToolRegistry, buffer: *std.ArrayList(u8)) !void {
-        var it = self.tools.keyIterator();
-        var first = true;
-        while (it.next()) |key| {
-            if (!first) {
-                try buffer.appendSlice(", ");
+    /// Get list of all tools formatted as "name - description" strings
+    /// Caller owns the returned array and strings, must call deinit() and free items
+    pub fn listTool(self: *ToolRegistry) !std.ArrayList([]const u8) {
+        var result: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (result.items) |item| {
+                self.allocator.free(item);
             }
-            try buffer.appendSlice(key.*);
-            first = false;
+            result.deinit(self.allocator);
         }
+
+        var it = self.tools.iterator();
+        while (it.next()) |entry| {
+            const tool = entry.value_ptr;
+            const formatted = try std.fmt.allocPrint(self.allocator, "  • {s} - {s}", .{ tool.name, tool.description });
+            try result.append(self.allocator, formatted);
+        }
+
+        return result;
     }
 };
 
@@ -116,5 +124,5 @@ fn finishTask(allocator: std.mem.Allocator, argument: []const u8) !void {
     _ = allocator;
 
     // Print the final response
-    std.debug.print("\n{s}\n", .{argument});
+    std.debug.print("{s}\n", .{argument});
 }

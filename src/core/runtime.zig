@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Agent = @import("../agent/mod.zig").Agent;
-const Repl = @import("../transport/repl.zig");
+const Repl = @import("../channel/repl.zig");
 
 // Configuration paths
 const OMNICLAW_DIR = ".omniclaw";
