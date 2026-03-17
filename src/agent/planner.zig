@@ -289,7 +289,7 @@ pub const Planner = struct {
 
     /// Get next plan from LLM (single iteration)
     pub fn getNextPlan(self: *Planner) !Plan {
-        const response = try self.model.make_request(self.messages.items, self.allocator);
+        const response = try self.model.make_request(self.messages, self.allocator, .{});
         defer self.allocator.free(response);
 
         const parsed: std.json.Parsed(Plan) = try std.json.parseFromSlice(
@@ -388,7 +388,7 @@ pub const Planner = struct {
     pub fn plan(self: *Planner, prompt: []const u8) !Plan {
         try self.initializeConversation(prompt);
 
-        const response = try self.model.make_request(self.messages.items, self.allocator);
+        const response = try self.model.make_request(self.messages, self.allocator, .{});
         defer self.allocator.free(response);
 
         const parsed: std.json.Parsed(Plan) = try std.json.parseFromSlice(
