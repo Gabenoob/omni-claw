@@ -407,7 +407,8 @@ pub const Planner = struct {
         const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = false });
         defer self.allocator.free(response);
 
-        const parsed_response = try self.parsePlanResponse(response);
+        var parsed_response = try self.parsePlanResponse(response);
+        errdefer parsed_response.deinit(self.allocator);
 
         // Store assistant's response in message history
         try self.messages.append(self.allocator, Message{
@@ -417,6 +418,8 @@ pub const Planner = struct {
 
         // Save to conversation log
         try self.appendMessageToLog("assistant", parsed_response.sanitized_response);
+
+        self.allocator.free(parsed_response.sanitized_response);
 
         return parsed_response.plan;
     }
