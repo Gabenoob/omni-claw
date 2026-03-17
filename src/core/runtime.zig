@@ -55,10 +55,10 @@ pub const Runtime = struct {
     allocator: std.mem.Allocator,
     agent: Agent,
 
-    pub fn init(allocator: std.mem.Allocator) !Runtime {
+    pub fn init(allocator: std.mem.Allocator, max_iterations: usize) !Runtime {
         return Runtime{
             .allocator = allocator,
-            .agent = try Agent.init(allocator),
+            .agent = try Agent.init(allocator, max_iterations),
         };
     }
 

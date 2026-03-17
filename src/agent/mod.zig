@@ -14,10 +14,10 @@ pub const Agent = struct {
     registry: ToolRegistry,
     config: ?Config,
 
-    pub fn init(allocator: std.mem.Allocator) !Agent {
+    pub fn init(allocator: std.mem.Allocator, max_iterations: usize) !Agent {
         return Agent{
             .allocator = allocator,
-            .planner = Planner.init(allocator),
+            .planner = Planner.init(allocator, max_iterations),
             .registry = try createDefaultRegistry(allocator),
             .config = null,
         };

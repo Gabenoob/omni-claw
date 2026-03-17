@@ -112,13 +112,13 @@ pub const Planner = struct {
     max_iterations: usize,
     conversation_log_path: []const u8,
 
-    pub fn init(allocator: std.mem.Allocator) Planner {
+    pub fn init(allocator: std.mem.Allocator, max_iterations: usize) Planner {
         return .{
             .allocator = allocator,
             .rlm = null,
             .model = ModelHandler{},
             .messages = std.ArrayList(Message).empty,
-            .max_iterations = 10,
+            .max_iterations = max_iterations,
             .conversation_log_path = CONVERSATION_LOG_PATH,
         };
     }
@@ -414,13 +414,20 @@ pub const Planner = struct {
         // plan fields are returned to caller; free them on error
         errdefer self.allocator.free(parsed_response.plan.tool);
         errdefer self.allocator.free(parsed_response.plan.argument);
+        // free sanitized_response on error until ownership transfers to messages
 
         // Store assistant's response in message history
-        try self.messages.append(self.allocator, Message{
+        self.messages.append(self.allocator, Message{
             .role = "assistant",
             .content = parsed_response.sanitized_response,
             // ownership of sanitized_response transfers to messages here
-        });
+        }) catch {
+            // If appending to messages fails, free sanitized_response here
+            self.allocator.free(parsed_response.sanitized_response);
+            return error.OutOfMemory;
+        };
+
+        // ownership has transferred; do not free in errdefer anymore
 
         // Save to conversation log
         try self.appendMessageToLog("assistant", parsed_response.sanitized_response);

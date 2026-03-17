@@ -28,5 +28,10 @@ pub const VERSION = "0.15.2";
 
 /// Initialize the runtime with default settings
 pub fn initRuntime(allocator: std.mem.Allocator) !Runtime {
-    return Runtime.init(allocator);
+    return Runtime.init(allocator, 10);
+}
+
+/// Initialize the runtime with custom max_iterations
+pub fn initRuntimeWithMaxIterations(allocator: std.mem.Allocator, max_iterations: usize) !Runtime {
+    return Runtime.init(allocator, max_iterations);
 }
