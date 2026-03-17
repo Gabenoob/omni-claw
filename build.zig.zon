@@ -4,7 +4,7 @@
     .dependencies = .{
         .Omni_RLM = .{
             .url = "https://github.com/Open-Model-Initiative/Omni-RLM/archive/refs/tags/v0.1.1.tar.gz",
-            .hash = "Omni_RLM-0.0.0-wUWNVPqLAgDxY7gaDneP6zHTF4eEsgarCEjqFlzZcv-y",
+            .hash = "Omni_RLM-0.0.0-wUWNVBiMAgC2uitJ35iGuXSnLUamJ_Pr-YyzLSPFhwV9",
         },
     },
     .paths = .{""},
