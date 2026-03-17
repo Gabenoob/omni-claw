@@ -3,6 +3,7 @@ const Agent = @import("../agent/mod.zig").Agent;
 
 const MAX_HISTORY = 100;
 const MAX_LINE_LEN = 2048;
+const CONVERSATION_LOG_PATH = @import("../agent/planner.zig").CONVERSATION_LOG_PATH;
 
 // UTF-8 character state for multi-byte character handling
 const Utf8State = struct {
@@ -488,10 +489,21 @@ fn disableRawMode(stdin: std.fs.File, original: Termios) !void {
     try std.posix.tcsetattr(stdin.handle, .FLUSH, original);
 }
 
+fn deleteConversationLog() !void {
+    std.fs.cwd().deleteFile(CONVERSATION_LOG_PATH) catch |err| {
+        if (err == error.FileNotFound) return;
+        return err;
+    };
+}
+
 // Public API for backward compatibility
 pub fn run(agent: *Agent) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
+
+    defer deleteConversationLog() catch |err| {
+        std.debug.print("Warning: failed to delete {s}: {any}\n", .{ CONVERSATION_LOG_PATH, err });
+    };
 
     var repl = Repl.init(gpa.allocator(), agent);
     defer repl.deinit();

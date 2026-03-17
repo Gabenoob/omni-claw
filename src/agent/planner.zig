@@ -53,7 +53,7 @@ const TOOLS_MD_PATH = "tools/tools.md";
 const TOOLS_DOCS_DIR = "tools/docs/";
 
 // Conversation log path
-const CONVERSATION_LOG_PATH = "logs/conversation.jsonl";
+pub const CONVERSATION_LOG_PATH = "logs/conversation.jsonl";
 
 const STAGE1_SYSTEM_PROMPT =
     \\You are omniclaw, an AI agent assistant. Your task is to analyze user requests and select the appropriate tool to execute.
@@ -404,7 +404,7 @@ pub const Planner = struct {
 
     /// Get next plan from LLM (single iteration)
     pub fn getNextPlan(self: *Planner) !Plan {
-        const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = false });
+        const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = true });
         defer self.allocator.free(response);
 
         var parsed_response = try self.parsePlanResponse(response);
@@ -499,12 +499,9 @@ pub const Planner = struct {
         const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = false });
         defer self.allocator.free(response);
 
-        var parsed_response = try self.parsePlanResponse(response);
-        defer parsed_response.deinit(self.allocator);
+        const parsed_response = try self.parsePlanResponse(response);
+        defer self.allocator.free(parsed_response.sanitized_response);
 
-        return Plan{
-            .tool = try self.allocator.dupe(u8, parsed_response.plan.tool),
-            .argument = try self.allocator.dupe(u8, parsed_response.plan.argument),
-        };
+        return parsed_response.plan;
     }
 };
