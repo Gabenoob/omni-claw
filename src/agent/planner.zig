@@ -37,6 +37,17 @@ pub const PlanResult = struct {
     }
 };
 
+const ParsedPlanResponse = struct {
+    plan: Plan,
+    sanitized_response: []const u8,
+
+    pub fn deinit(self: *ParsedPlanResponse, allocator: std.mem.Allocator) void {
+        allocator.free(self.plan.tool);
+        allocator.free(self.plan.argument);
+        allocator.free(self.sanitized_response);
+    }
+};
+
 // Paths to tool documentation
 const TOOLS_MD_PATH = "tools/tools.md";
 const TOOLS_DOCS_DIR = "tools/docs/";
@@ -287,33 +298,127 @@ pub const Planner = struct {
         return result.toOwnedSlice(allocator);
     }
 
-    /// Get next plan from LLM (single iteration)
-    pub fn getNextPlan(self: *Planner) !Plan {
-        const response = try self.model.make_request(self.messages, self.allocator, .{});
-        defer self.allocator.free(response);
+    fn stripThinkTags(allocator: std.mem.Allocator, response: []const u8) ![]const u8 {
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(allocator);
+
+        var index: usize = 0;
+        while (index < response.len) {
+            if (std.mem.startsWith(u8, response[index..], "<think>")) {
+                const content_start = index + "<think>".len;
+                if (std.mem.indexOfPos(u8, response, content_start, "</think>")) |close_index| {
+                    index = close_index + "</think>".len;
+                    continue;
+                }
+
+                index = content_start;
+                continue;
+            }
+
+            try result.append(allocator, response[index]);
+            index += 1;
+        }
+
+        return result.toOwnedSlice(allocator);
+    }
+
+    fn extractFirstJsonObject(allocator: std.mem.Allocator, response: []const u8) ![]const u8 {
+        var start_index: usize = 0;
+        while (start_index < response.len) : (start_index += 1) {
+            if (response[start_index] != '{') continue;
+
+            var depth: usize = 0;
+            var index = start_index;
+            var in_string = false;
+            var escaped = false;
+
+            while (index < response.len) : (index += 1) {
+                const char = response[index];
+
+                if (in_string) {
+                    if (escaped) {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (char == '\\') {
+                        escaped = true;
+                    } else if (char == '"') {
+                        in_string = false;
+                    }
+                    continue;
+                }
+
+                switch (char) {
+                    '"' => in_string = true,
+                    '{' => depth += 1,
+                    '}' => {
+                        if (depth == 0) break;
+                        depth -= 1;
+                        if (depth == 0) {
+                            return try allocator.dupe(u8, response[start_index .. index + 1]);
+                        }
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        return error.InvalidModelResponse;
+    }
+
+    fn sanitizePlanResponse(allocator: std.mem.Allocator, response: []const u8) ![]const u8 {
+        const without_think = try stripThinkTags(allocator, response);
+        defer allocator.free(without_think);
+
+        const trimmed = std.mem.trim(u8, without_think, " \t\r\n");
+        return try extractFirstJsonObject(allocator, trimmed);
+    }
+
+    fn parsePlanResponse(self: *Planner, response: []const u8) !ParsedPlanResponse {
+        const sanitized_response = try sanitizePlanResponse(self.allocator, response);
+        errdefer self.allocator.free(sanitized_response);
 
         const parsed: std.json.Parsed(Plan) = try std.json.parseFromSlice(
             Plan,
             self.allocator,
-            response,
+            sanitized_response,
             .{},
         );
         defer parsed.deinit();
 
+        const tool = try self.allocator.dupe(u8, parsed.value.tool);
+        errdefer self.allocator.free(tool);
+
+        const argument = try self.allocator.dupe(u8, parsed.value.argument);
+        errdefer self.allocator.free(argument);
+
+        return ParsedPlanResponse{
+            .plan = .{
+                .tool = tool,
+                .argument = argument,
+            },
+            .sanitized_response = sanitized_response,
+        };
+    }
+
+    /// Get next plan from LLM (single iteration)
+    pub fn getNextPlan(self: *Planner) !Plan {
+        const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = false });
+        defer self.allocator.free(response);
+
+        const parsed_response = try self.parsePlanResponse(response);
+
         // Store assistant's response in message history
-        const assistant_content = try self.allocator.dupe(u8, response);
         try self.messages.append(self.allocator, Message{
             .role = "assistant",
-            .content = assistant_content,
+            .content = parsed_response.sanitized_response,
         });
 
         // Save to conversation log
-        try self.appendMessageToLog("assistant", response);
+        try self.appendMessageToLog("assistant", parsed_response.sanitized_response);
 
-        return Plan{
-            .tool = try self.allocator.dupe(u8, parsed.value.tool),
-            .argument = try self.allocator.dupe(u8, parsed.value.argument),
-        };
+        return parsed_response.plan;
     }
 
     /// Add tool result to message history
@@ -388,20 +493,15 @@ pub const Planner = struct {
     pub fn plan(self: *Planner, prompt: []const u8) !Plan {
         try self.initializeConversation(prompt);
 
-        const response = try self.model.make_request(self.messages, self.allocator, .{});
+        const response = try self.model.make_request(self.messages, self.allocator, .{ .enable_thinking = false });
         defer self.allocator.free(response);
 
-        const parsed: std.json.Parsed(Plan) = try std.json.parseFromSlice(
-            Plan,
-            self.allocator,
-            response,
-            .{},
-        );
-        defer parsed.deinit();
+        var parsed_response = try self.parsePlanResponse(response);
+        defer parsed_response.deinit(self.allocator);
 
         return Plan{
-            .tool = try self.allocator.dupe(u8, parsed.value.tool),
-            .argument = try self.allocator.dupe(u8, parsed.value.argument),
+            .tool = try self.allocator.dupe(u8, parsed_response.plan.tool),
+            .argument = try self.allocator.dupe(u8, parsed_response.plan.argument),
         };
     }
 };
