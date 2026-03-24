@@ -41,10 +41,19 @@ pub const Agent = struct {
             self.allocator.free(cfg.model_name);
         }
 
+        const base_url = try self.allocator.dupe(u8, config.base_url);
+        errdefer self.allocator.free(base_url);
+        
+        const api_key = if (config.api_key) |key| try self.allocator.dupe(u8, key) else null;
+        errdefer if (api_key) |key| self.allocator.free(key);
+        
+        const model_name = try self.allocator.dupe(u8, config.model_name);
+        errdefer self.allocator.free(model_name);
+
         self.config = Config{
-            .base_url = try self.allocator.dupe(u8, config.base_url),
-            .api_key = if (config.api_key) |key| try self.allocator.dupe(u8, key) else null,
-            .model_name = try self.allocator.dupe(u8, config.model_name),
+            .base_url = base_url,
+            .api_key = api_key,
+            .model_name = model_name,
         };
 
         try self.planner.setConnectionConfig(self.config.?);
@@ -142,6 +151,7 @@ pub const Agent = struct {
         while (iteration < max_iterations) : (iteration += 1) {
             // Get next plan from LLM
             var plan = try self.planner.getNextPlan();
+            defer plan.deinit(self.allocator);
 
             // Check if this is the finish tool
             if (std.mem.eql(u8, plan.tool, "finish")) {
@@ -159,10 +169,24 @@ pub const Agent = struct {
             defer self.allocator.free(tool_result.output);
 
             // Record the tool call
+            const tool_copy = try self.allocator.dupe(u8, plan.tool);
+            errdefer self.allocator.free(tool_copy);
+            
+            var arguments_copy = try @import("planner.zig").Planner.cloneStringList(self.allocator, plan.arguments);
+            errdefer {
+                for (arguments_copy.items) |item| {
+                    self.allocator.free(item);
+                }
+                arguments_copy.deinit(self.allocator);
+            }
+            
+            const result_copy = try self.allocator.dupe(u8, tool_result.output);
+            errdefer self.allocator.free(result_copy);
+            
             try tool_calls.append(self.allocator, .{
-                .tool = try self.allocator.dupe(u8, plan.tool),
-                .arguments = try plan.arguments.clone(self.allocator),
-                .result = try self.allocator.dupe(u8, tool_result.output),
+                .tool = tool_copy,
+                .arguments = arguments_copy,
+                .result = result_copy,
                 .success = tool_result.success,
             });
 
@@ -170,7 +194,11 @@ pub const Agent = struct {
             try self.planner.addToolResult(plan.tool, tool_result.output, tool_result.success);
         }
 
-        // Max iterations reached
+        // Max iterations reached - cleanup before returning error
+        for (tool_calls.items) |*call| {
+            call.deinit(self.allocator);
+        }
+        tool_calls.deinit(self.allocator);
         return error.MaxIterationsReached;
     }
 };

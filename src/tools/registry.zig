@@ -108,6 +108,10 @@ fn execBash(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) 
         .argv = &.{ "bash", "-c", cmd_line },
         .max_output_bytes = max_output_bytes,
     });
+    defer {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
+    }
 
     const stdout = result.stdout;
     const stderr = result.stderr;

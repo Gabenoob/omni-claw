@@ -136,6 +136,7 @@ pub const Planner = struct {
     pub fn deinit(self: *Planner) void {
         if (self.rlm) |*rlm| rlm.deinit();
         for (self.messages.items) |msg| {
+            self.allocator.free(msg.role);
             self.allocator.free(msg.content);
         }
         self.messages.deinit(self.allocator);
@@ -154,6 +155,7 @@ pub const Planner = struct {
     pub fn initializeConversation(self: *Planner, prompt: []const u8) !void {
         // Clear any existing messages
         for (self.messages.items) |msg| {
+            self.allocator.free(msg.role);
             self.allocator.free(msg.content);
         }
         self.messages.deinit(self.allocator);
@@ -161,8 +163,11 @@ pub const Planner = struct {
 
         // Add system prompt
         const system_prompt = try build_system_prompt(self.allocator);
+        errdefer self.allocator.free(system_prompt);
+        const role = try self.allocator.dupe(u8, "system");
+        errdefer self.allocator.free(role);
         try self.messages.append(self.allocator, Message{
-            .role = try self.allocator.dupe(u8, "system"),
+            .role = role,
             .content = system_prompt,
         });
 
@@ -170,9 +175,13 @@ pub const Planner = struct {
         try self.loadConversationLog();
 
         // Add user prompt
+        const user_role = try self.allocator.dupe(u8, "user");
+        errdefer self.allocator.free(user_role);
+        const user_content = try self.allocator.dupe(u8, prompt);
+        errdefer self.allocator.free(user_content);
         try self.messages.append(self.allocator, Message{
-            .role = try self.allocator.dupe(u8, "user"),
-            .content = try self.allocator.dupe(u8, prompt),
+            .role = user_role,
+            .content = user_content,
         });
 
         // Save the new user message to log
@@ -297,7 +306,9 @@ pub const Planner = struct {
                 else => {
                     if (c < 0x20) {
                         // Control characters
-                        try result.appendSlice(allocator, try std.fmt.allocPrint(allocator, "\\u{X:0>4}", .{c}));
+                        const escaped = try std.fmt.allocPrint(allocator, "\\u{X:0>4}", .{c});
+                        defer allocator.free(escaped);
+                        try result.appendSlice(allocator, escaped);
                     } else {
                         try result.append(allocator, c);
                     }
@@ -417,6 +428,7 @@ pub const Planner = struct {
 
         for (parsed.value.arguments) |arg| {
             const arg_copy = try self.allocator.dupe(u8, arg);
+            errdefer self.allocator.free(arg_copy);
             try arguments.append(self.allocator, arg_copy);
         }
 
@@ -429,6 +441,25 @@ pub const Planner = struct {
         };
     }
 
+    /// Deep clone an ArrayList of strings (duplicates both the list and each string)
+    pub fn cloneStringList(allocator: std.mem.Allocator, list: std.ArrayList([]const u8)) !std.ArrayList([]const u8) {
+        var result = std.ArrayList([]const u8).empty;
+        errdefer {
+            for (result.items) |item| {
+                allocator.free(item);
+            }
+            result.deinit(allocator);
+        }
+        
+        for (list.items) |item| {
+            const item_copy = try allocator.dupe(u8, item);
+            errdefer allocator.free(item_copy);
+            try result.append(allocator, item_copy);
+        }
+        
+        return result;
+    }
+
     /// Get next plan from LLM (single iteration)
     pub fn getNextPlan(self: *Planner) !Plan {
         const response = try self.model.make_request(self.messages, self.allocator, .{
@@ -438,27 +469,31 @@ pub const Planner = struct {
         defer self.allocator.free(response);
 
         var parsed_response = try self.parsePlanResponse(response);
-        // plan fields are returned to caller; free them on error
-        errdefer parsed_response.plan.deinit(self.allocator);
-        // free sanitized_response on error until ownership transfers to messages
+        defer parsed_response.deinit(self.allocator);
 
         // Store assistant's response in message history
-        self.messages.append(self.allocator, Message{
-            .role = "assistant",
-            .content = parsed_response.sanitized_response,
-            // ownership of sanitized_response transfers to messages here
-        }) catch {
-            // If appending to messages fails, free sanitized_response here
-            self.allocator.free(parsed_response.sanitized_response);
-            return error.OutOfMemory;
-        };
-
-        // ownership has transferred; do not free in errdefer anymore
-
+        const assistant_role = try self.allocator.dupe(u8, "assistant");
+        errdefer self.allocator.free(assistant_role);
+        // Clone sanitized_response since we need to keep it for both messages and log
+        const content_copy = try self.allocator.dupe(u8, parsed_response.sanitized_response);
+        errdefer self.allocator.free(content_copy);
+        
+        try self.messages.append(self.allocator, Message{
+            .role = assistant_role,
+            .content = content_copy,
+        });
         // Save to conversation log
         try self.appendMessageToLog("assistant", parsed_response.sanitized_response);
 
-        return parsed_response.plan;
+        // Return a deep copy of the plan
+        const tool_copy = try self.allocator.dupe(u8, parsed_response.plan.tool);
+        errdefer self.allocator.free(tool_copy);
+        const args_copy = try cloneStringList(self.allocator, parsed_response.plan.arguments);
+        
+        return Plan{
+            .tool = tool_copy,
+            .arguments = args_copy,
+        };
     }
 
     /// Add tool result to message history
@@ -468,9 +503,13 @@ pub const Planner = struct {
             "Tool '{s}' executed. Success: {}. Result: {s}",
             .{ tool_name, success, result_output },
         );
+        errdefer self.allocator.free(content);
+
+        const role = try self.allocator.dupe(u8, "user");
+        errdefer self.allocator.free(role);
 
         try self.messages.append(self.allocator, Message{
-            .role = "user",
+            .role = role,
             .content = content,
         });
 
