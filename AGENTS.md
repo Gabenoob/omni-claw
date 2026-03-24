@@ -5,6 +5,7 @@ Omni-Claw is an experimental Zig-based AI agent runtime that integrates with Omn
 ## Project Overview
 
 Omni-Claw provides an AI agent architecture where:
+
 - User prompts are processed by an Omni-RLM planner via HTTP API
 - The planner selects appropriate tools based on the prompt
 - Tools execute via a tool registry (bash execution via `exec` tool)
@@ -49,14 +50,14 @@ src/
 
 ### Module Organization
 
-| Module | Purpose | Key Types/Functions |
-|--------|---------|---------------------|
-| `omniclaw.zig` | Public API root | `Runtime`, `Config`, `Agent`, `Planner`, `Plan`, `ToolRegistry`, `Tool`, `ToolExecutor`, `VERSION` |
-| `core/runtime.zig` | Core runtime | `Runtime` (init, deinit, start), `Config`, configuration handling, `.omniclaw/` directory setup |
-| `agent/mod.zig` | Agent coordinator | `Agent` (init, deinit, configureLlmConnection, runPrompt, printConfig, printTools, executeRecursive) |
-| `agent/planner.zig` | LLM-based planning | `Planner`, `Plan`, `PlanResult`, `ToolCallRecord`, `getNextPlan`, `addToolResult`, conversation logging |
-| `tools/registry.zig` | Tool definitions | `ToolRegistry`, `Tool`, `ToolExecutor`, `ToolResult`, `createDefaultRegistry`, `execBash`, `finishTask` |
-| `channel/repl.zig` | User interface | `Repl`, `run(agent)`, raw terminal mode, command history, UTF-8 support |
+| Module               | Purpose            | Key Types/Functions                                                                                     |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| `omniclaw.zig`       | Public API root    | `Runtime`, `Config`, `Agent`, `Planner`, `Plan`, `ToolRegistry`, `Tool`, `ToolExecutor`, `VERSION`      |
+| `core/runtime.zig`   | Core runtime       | `Runtime` (init, deinit, start), `Config`, configuration handling, `.omniclaw/` directory setup         |
+| `agent/mod.zig`      | Agent coordinator  | `Agent` (init, deinit, configureLlmConnection, runPrompt, printConfig, printTools, executeRecursive)    |
+| `agent/planner.zig`  | LLM-based planning | `Planner`, `Plan`, `PlanResult`, `ToolCallRecord`, `getNextPlan`, `addToolResult`, conversation logging |
+| `tools/registry.zig` | Tool definitions   | `ToolRegistry`, `Tool`, `ToolExecutor`, `ToolResult`, `createDefaultRegistry`, `execBash`, `finishTask` |
+| `channel/repl.zig`   | User interface     | `Repl`, `run(agent)`, raw terminal mode, command history, UTF-8 support                                 |
 
 ### Data Flow
 
@@ -87,20 +88,24 @@ User Input → REPL → Agent.runPrompt() → Planner.initializeConversation()
 ## Build Commands
 
 **Prerequisites**:
+
 - [mise](https://mise.jdx.dev/) (for Zig version management)
 - Zig 0.15.1
 
 **Install Zig**:
+
 ```bash
 mise install
 ```
 
 **Build**:
+
 ```bash
 mise exec -- zig build
 ```
 
 **Run**:
+
 ```bash
 mise exec -- ./zig-out/bin/omniclaw
 # Or:
@@ -108,16 +113,19 @@ mise exec -- zig build run
 ```
 
 **Test**:
+
 ```bash
 mise exec -- zig build test
 ```
 
 **Test with filter**:
+
 ```bash
 mise exec -- zig build test -- -Dtest-filter=<filter>
 ```
 
 **Direct build without mise** (if you have Zig 0.15.1 installed):
+
 ```bash
 zig build
 zig build run    # Build and run
@@ -139,10 +147,12 @@ Use existing .env file from current directory? [y/N]:
 ```
 
 **Option 1: Use existing `.env` file**
+
 - If you have a `.env` file in the current directory, answer `y`
 - The runtime will copy it to `.omniclaw/.env`
 
 **Option 2: Create new configuration (interactive)**
+
 - Answer `n` to create a fresh configuration
 - The runtime will guide you through:
 
@@ -189,36 +199,37 @@ DAYTONA_API_KEY=
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OMNIRLM_BASE_URL` | Base URL for LLM API endpoint | `http://127.0.0.1:11435` |
-| `OMNIRLM_API_KEY` | API key for hosted LLM services | (none) |
-| `OMNIRLM_MODEL_NAME` | Model name to use | `kimi-k2.5` |
-| `DAYTONA_API_KEY` | Daytona sandbox API key | (none) |
+| Variable             | Description                     | Default                  |
+| -------------------- | ------------------------------- | ------------------------ |
+| `OMNIRLM_BASE_URL`   | Base URL for LLM API endpoint   | `http://127.0.0.1:11435` |
+| `OMNIRLM_API_KEY`    | API key for hosted LLM services | (none)                   |
+| `OMNIRLM_MODEL_NAME` | Model name to use               | `kimi-k2.5`              |
+| `DAYTONA_API_KEY`    | Daytona sandbox API key         | (none)                   |
 
 ## REPL Commands
 
 When running Omni-Claw, you enter an interactive REPL:
 
-| Command | Description |
-|---------|-------------|
-| `<prompt>` | Any text is sent to the planner for tool selection and execution |
-| `/config` | Display current LLM configuration |
-| `/tools` | Display list of available tools |
-| `/exit` or `/quit` | Exit the REPL |
+| Command            | Description                                                      |
+| ------------------ | ---------------------------------------------------------------- |
+| `<prompt>`         | Any text is sent to the planner for tool selection and execution |
+| `/config`          | Display current LLM configuration                                |
+| `/tools`           | Display list of available tools                                  |
+| `/exit` or `/quit` | Exit the REPL                                                    |
 
 ### REPL Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate command history |
-| `←` / `→` | Move cursor |
+| Key                 | Action                    |
+| ------------------- | ------------------------- |
+| `↑` / `↓`           | Navigate command history  |
+| `←` / `→`           | Move cursor               |
 | `Ctrl+A` / `Ctrl+E` | Move to start/end of line |
-| `Ctrl+U` | Clear entire line |
-| `Ctrl+K` | Clear from cursor to end |
-| `Ctrl+C` / `Ctrl+D` | Exit REPL |
+| `Ctrl+U`            | Clear entire line         |
+| `Ctrl+K`            | Clear from cursor to end  |
+| `Ctrl+C` / `Ctrl+D` | Exit REPL                 |
 
 Example session:
+
 ```
 OmniClaw-Zig-RLM runtime started
 Found existing configuration at .omniclaw/.env
@@ -267,16 +278,19 @@ Model: kimi-k2.5
 The project uses Zig's built-in test framework:
 
 **Run all tests**:
+
 ```bash
 mise exec -- zig build test
 ```
 
 **Test with filter**:
+
 ```bash
 mise exec -- zig build test -- -Dtest-filter=<filter>
 ```
 
 The `src/test.zig` module imports all other modules to verify compilation:
+
 - Core modules: runtime
 - Agent modules: agent/mod, planner
 - Tool modules: registry
@@ -285,6 +299,7 @@ The `src/test.zig` module imports all other modules to verify compilation:
 - Main entry point
 
 Manual testing in the REPL:
+
 - `ls -la` - Tests exec tool (bash command)
 - `pwd` - Tests exec tool
 - `cat filename` - Tests file reading via exec
@@ -303,17 +318,19 @@ Tool documentation is split into two levels:
 1. **Tool List** (`src/tools/TOOLS.md`) - Contains only the list of available tools with brief descriptions
 2. **Tool Details** (`src/tools/docs/<tool>.md`) - Individual markdown files with detailed documentation
 
-The planner reads `TOOLS.md` to understand available tools, then generates a plan with tool name and argument.
+The planner reads `TOOLS.md` to understand available tools, then generates a plan specifying the tool name and an `arguments` array (for example: `{"tool": "<name>", "arguments": [...]}`).
 
 ### Built-in Tools
 
 **`exec`** - Execute bash commands in the current environment
+
 - Executes any valid bash command via `std.process.Child`
 - Has full access to the host system (use with caution)
 - Examples: `ls`, `cat`, `grep`, `python`, `curl`, etc.
 - Full documentation in `src/tools/docs/exec.md`
 
 **`finish`** - Provide final answer and complete the task
+
 - Used when no system commands are needed
 - Provides direct answers to questions
 - For explanations, analysis, or conversational responses
@@ -333,7 +350,7 @@ pub const Tool = struct {
     executor: ToolExecutor,
 };
 
-pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, argument: []const u8) anyerror!ToolResult;
+pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) anyerror!ToolResult;
 ```
 
 ### Adding New Tools
@@ -341,6 +358,7 @@ pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, argument: []co
 To add a new tool:
 
 1. **Update `src/tools/TOOLS.md`** - Add tool to the table:
+
 ```markdown
 | new_tool | category | Description here | tools/docs/new_tool.md |
 ```
@@ -348,6 +366,7 @@ To add a new tool:
 2. **Create `src/tools/docs/new_tool.md`** with detailed documentation
 
 3. **Open `src/tools/registry.zig`** and add executor function:
+
 ```zig
 fn newToolExecutor(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) !ToolResult {
     // Implement tool logic here
@@ -360,6 +379,7 @@ fn newToolExecutor(allocator: std.mem.Allocator, arguments: std.ArrayList([]cons
 ```
 
 4. **Register it in `createDefaultRegistry`**:
+
 ```zig
 try registry.register(.{
     .name = "new_tool",
@@ -378,16 +398,18 @@ The planner (`src/agent/planner.zig`) uses an LLM to select tools based on user 
 4. **Model Handler**: Configured with base_url, api_key, model_name
 
 Example plan response:
+
 ```json
 {
-    "tool": "exec",
-    "arguments": ["ls", "-la"]
+  "tool": "exec",
+  "arguments": ["ls", "-la"]
 }
 ```
 
 ### Recursive Execution
 
 The planner supports recursive execution (up to `max_iterations`):
+
 1. Get plan from LLM
 2. Execute tool
 3. Add result to message history
@@ -396,6 +418,7 @@ The planner supports recursive execution (up to `max_iterations`):
 ### Conversation Logging
 
 Conversations are automatically logged to `logs/conversation.jsonl`:
+
 - Format: JSON Lines (one JSON object per line)
 - Contains: role, content for each message
 - Persists across sessions
@@ -403,12 +426,12 @@ Conversations are automatically logged to `logs/conversation.jsonl`:
 
 ## Security Considerations
 
-1. **API Keys**: 
+1. **API Keys**:
    - The `.env` file contains sensitive credentials
    - `.omniclaw/.env` and `.env` are gitignored
    - Never commit actual API keys to version control
 
-2. **Bash Execution**: 
+2. **Bash Execution**:
    - The `exec` tool has full system access via `bash -c`
    - Be careful with destructive commands (`rm -rf`, `dd`, etc.)
    - Commands run with the privileges of the Omni-Claw process
@@ -448,6 +471,7 @@ Conversations are automatically logged to `logs/conversation.jsonl`:
 ### External Library: Omni-RLM
 
 Provides:
+
 - `RLM` - Reasoning language model interface
 - `RLMLogger` - Logging utilities
 - `ModelHandler` - HTTP API client for LLM requests (OpenAI-compatible)
@@ -456,6 +480,7 @@ Provides:
 ## Common Development Tasks
 
 **Add a new tool**:
+
 1. Open `src/tools/registry.zig`
 2. Implement a new executor function (returning `ToolResult`)
 3. Register it in `createDefaultRegistry()`
@@ -463,15 +488,18 @@ Provides:
 5. Create documentation in `src/tools/docs/<tool>.md`
 
 **Modify planner behavior**:
+
 - Edit `src/agent/planner.zig`
 - Update `SYSTEM_PROMPT` constant for different instructions
 - The `getNextPlan()` function processes LLM responses and returns a `Plan`
 
 **Update Omni-RLM dependency**:
+
 - Edit `build.zig.zon` with new URL and hash
 - Run `zig build` to fetch and verify
 
 **Using the public API**:
+
 ```zig
 const omniclaw = @import("omniclaw.zig");
 
