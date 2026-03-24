@@ -194,11 +194,6 @@ pub const Agent = struct {
             try self.planner.addToolResult(plan.tool, tool_result.output, tool_result.success);
         }
 
-        // Max iterations reached - cleanup before returning error
-        for (tool_calls.items) |*call| {
-            call.deinit(self.allocator);
-        }
-        tool_calls.deinit(self.allocator);
         return error.MaxIterationsReached;
     }
 };
