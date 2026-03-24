@@ -402,6 +402,17 @@ test "show_config" {
         .api_key = "my-secret-api-key",
         .model_name = "my_model",
     };
-    const stdout_file = std.fs.File.stderr();
-    try config.print(stdout_file);
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+    try config.print(stream.writer());
+    const output = stream.getWritten();
+    try std.testing.expectEqualStrings(
+        \\LLM Provider: OpenAI-compatible API
+        \\Base URL: http://example.com
+        \\API Key: my-s...-key
+        \\Model: my_model
+        \\
+    ,
+        output,
+    );
 }

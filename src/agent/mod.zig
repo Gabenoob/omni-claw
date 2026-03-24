@@ -43,10 +43,10 @@ pub const Agent = struct {
 
         const base_url = try self.allocator.dupe(u8, config.base_url);
         errdefer self.allocator.free(base_url);
-        
+
         const api_key = if (config.api_key) |key| try self.allocator.dupe(u8, key) else null;
         errdefer if (api_key) |key| self.allocator.free(key);
-        
+
         const model_name = try self.allocator.dupe(u8, config.model_name);
         errdefer self.allocator.free(model_name);
 
@@ -171,7 +171,7 @@ pub const Agent = struct {
             // Record the tool call
             const tool_copy = try self.allocator.dupe(u8, plan.tool);
             errdefer self.allocator.free(tool_copy);
-            
+
             var arguments_copy = try @import("planner.zig").Planner.cloneStringList(self.allocator, plan.arguments);
             errdefer {
                 for (arguments_copy.items) |item| {
@@ -179,10 +179,10 @@ pub const Agent = struct {
                 }
                 arguments_copy.deinit(self.allocator);
             }
-            
+
             const result_copy = try self.allocator.dupe(u8, tool_result.output);
             errdefer self.allocator.free(result_copy);
-            
+
             try tool_calls.append(self.allocator, .{
                 .tool = tool_copy,
                 .arguments = arguments_copy,
