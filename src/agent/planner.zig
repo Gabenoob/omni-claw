@@ -162,27 +162,31 @@ pub const Planner = struct {
         self.messages = std.ArrayList(Message).empty;
 
         // Add system prompt
-        const system_prompt = try build_system_prompt(self.allocator);
-        errdefer self.allocator.free(system_prompt);
-        const role = try self.allocator.dupe(u8, "system");
-        errdefer self.allocator.free(role);
-        try self.messages.append(self.allocator, Message{
-            .role = role,
-            .content = system_prompt,
-        });
+        {
+            const system_prompt = try build_system_prompt(self.allocator);
+            errdefer self.allocator.free(system_prompt);
+            const role = try self.allocator.dupe(u8, "system");
+            errdefer self.allocator.free(role);
+            try self.messages.append(self.allocator, Message{
+                .role = role,
+                .content = system_prompt,
+            });
+        }
 
         // Load previous conversation history from log
         try self.loadConversationLog();
 
         // Add user prompt
-        const user_role = try self.allocator.dupe(u8, "user");
-        errdefer self.allocator.free(user_role);
-        const user_content = try self.allocator.dupe(u8, prompt);
-        errdefer self.allocator.free(user_content);
-        try self.messages.append(self.allocator, Message{
-            .role = user_role,
-            .content = user_content,
-        });
+        {
+            const user_role = try self.allocator.dupe(u8, "user");
+            errdefer self.allocator.free(user_role);
+            const user_content = try self.allocator.dupe(u8, prompt);
+            errdefer self.allocator.free(user_content);
+            try self.messages.append(self.allocator, Message{
+                .role = user_role,
+                .content = user_content,
+            });
+        }
 
         // Save the new user message to log
         try self.appendMessageToLog("user", prompt);
@@ -217,10 +221,16 @@ pub const Planner = struct {
             // Skip system messages from log (we already added it)
             if (std.mem.eql(u8, parsed.value.role, "system")) continue;
 
-            try self.messages.append(self.allocator, Message{
-                .role = try self.allocator.dupe(u8, parsed.value.role),
-                .content = try self.allocator.dupe(u8, parsed.value.content),
-            });
+            {
+                const role = try self.allocator.dupe(u8, parsed.value.role);
+                errdefer self.allocator.free(role);
+                const msg_content = try self.allocator.dupe(u8, parsed.value.content);
+                errdefer self.allocator.free(msg_content);
+                try self.messages.append(self.allocator, Message{
+                    .role = role,
+                    .content = msg_content,
+                });
+            }
         }
     }
 
@@ -472,16 +482,17 @@ pub const Planner = struct {
         defer parsed_response.deinit(self.allocator);
 
         // Store assistant's response in message history
-        const assistant_role = try self.allocator.dupe(u8, "assistant");
-        errdefer self.allocator.free(assistant_role);
-        // Clone sanitized_response since we need to keep it for both messages and log
-        const content_copy = try self.allocator.dupe(u8, parsed_response.sanitized_response);
-        errdefer self.allocator.free(content_copy);
-        
-        try self.messages.append(self.allocator, Message{
-            .role = assistant_role,
-            .content = content_copy,
-        });
+        {
+            const assistant_role = try self.allocator.dupe(u8, "assistant");
+            errdefer self.allocator.free(assistant_role);
+            // Clone sanitized_response since we need to keep it for both messages and log
+            const content_copy = try self.allocator.dupe(u8, parsed_response.sanitized_response);
+            errdefer self.allocator.free(content_copy);
+            try self.messages.append(self.allocator, Message{
+                .role = assistant_role,
+                .content = content_copy,
+            });
+        }
         // Save to conversation log
         try self.appendMessageToLog("assistant", parsed_response.sanitized_response);
 
@@ -498,20 +509,21 @@ pub const Planner = struct {
 
     /// Add tool result to message history
     pub fn addToolResult(self: *Planner, tool_name: []const u8, result_output: []const u8, success: bool) !void {
-        const content = try std.fmt.allocPrint(
-            self.allocator,
-            "Tool '{s}' executed. Success: {}. Result: {s}",
-            .{ tool_name, success, result_output },
-        );
-        errdefer self.allocator.free(content);
-
-        const role = try self.allocator.dupe(u8, "user");
-        errdefer self.allocator.free(role);
-
-        try self.messages.append(self.allocator, Message{
-            .role = role,
-            .content = content,
-        });
+        const content = blk: {
+            const c = try std.fmt.allocPrint(
+                self.allocator,
+                "Tool '{s}' executed. Success: {}. Result: {s}",
+                .{ tool_name, success, result_output },
+            );
+            errdefer self.allocator.free(c);
+            const role = try self.allocator.dupe(u8, "user");
+            errdefer self.allocator.free(role);
+            try self.messages.append(self.allocator, Message{
+                .role = role,
+                .content = c,
+            });
+            break :blk c;
+        };
 
         // Save to conversation log
         try self.appendMessageToLog("user", content);

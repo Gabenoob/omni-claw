@@ -313,8 +313,8 @@ pub const Runtime = struct {
     }
 
     fn copyFile(self: Runtime, source: []const u8, dest: []const u8) !void {
-        const content = try self.allocator.alloc(u8, 4096);
-        defer self.allocator.free(content);
+        _ = self;
+        var content: [4096]u8 = undefined;
 
         const src_file = try std.fs.cwd().openFile(source, .{});
         defer src_file.close();
@@ -323,7 +323,7 @@ pub const Runtime = struct {
         defer dst_file.close();
 
         while (true) {
-            const bytes_read = try src_file.read(content);
+            const bytes_read = try src_file.read(content[0..]);
             if (bytes_read == 0) break;
             try dst_file.writeAll(content[0..bytes_read]);
         }
