@@ -8,6 +8,7 @@ Omni-Claw is an experimental Zig-based AI agent runtime that integrates with Omn
 ## Overview
 
 Omni-Claw provides an AI agent architecture where:
+
 - User prompts are processed by an Omni-RLM planner via HTTP API
 - The planner selects appropriate tools based on the prompt
 - Tools execute via a tool registry (bash execution via `exec` tool)
@@ -36,7 +37,7 @@ src/
 │   └── planner.zig       # LLM-based planner with tool selection
 ├── tools/
 │   ├── registry.zig      # Tool registry implementation
-│   ├── tools.md          # Tool list (index for planner)
+│   ├── TOOLS.md          # Tool list (index for planner)
 │   └── docs/             # Individual tool documentation
 └── channel/
     └── repl.zig          # Interactive REPL interface
@@ -49,7 +50,7 @@ User Input → REPL → Agent.runPrompt() → Planner.initializeConversation()
                                               ↓
                               Load conversation history from logs/conversation.jsonl
                                               ↓
-                                      Read tools/tools.md
+                                      Read tools/TOOLS.md
                                               ↓
                                       LLM API (Omni-RLM) → JSON Plan
                                               ↓
@@ -132,24 +133,24 @@ Configuration is stored in `.omniclaw/.env` and persists across sessions.
 
 ## REPL Commands
 
-| Command | Description |
-|---------|-------------|
-| `<prompt>` | Any text is sent to the planner for tool selection and execution |
-| `/config` | Display current LLM configuration (API keys masked) |
-| `/tools` | Display list of available tools |
-| `/exit` or `/quit` | Exit the REPL |
+| Command            | Description                                                      |
+| ------------------ | ---------------------------------------------------------------- |
+| `<prompt>`         | Any text is sent to the planner for tool selection and execution |
+| `/config`          | Display current LLM configuration (API keys masked)              |
+| `/tools`           | Display list of available tools                                  |
+| `/exit` or `/quit` | Exit the REPL                                                    |
 
 ### REPL Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate command history |
-| `←` / `→` | Move cursor |
-| `Ctrl+A` / `Ctrl+E` | Move to start/end of line |
-| `Ctrl+U` | Clear entire line |
-| `Ctrl+K` | Clear from cursor to end |
-| `Backspace` / `Delete` | Delete characters |
-| `Ctrl+C` / `Ctrl+D` | Exit REPL |
+| Key                    | Action                    |
+| ---------------------- | ------------------------- |
+| `↑` / `↓`              | Navigate command history  |
+| `←` / `→`              | Move cursor               |
+| `Ctrl+A` / `Ctrl+E`    | Move to start/end of line |
+| `Ctrl+U`               | Clear entire line         |
+| `Ctrl+K`               | Clear from cursor to end  |
+| `Backspace` / `Delete` | Delete characters         |
+| `Ctrl+C` / `Ctrl+D`    | Exit REPL                 |
 
 ## Example Session
 
@@ -198,14 +199,15 @@ Omni-Claw uses a tool registry system to manage available tools.
 
 ### Built-in Tools
 
-| Tool | Description |
-|------|-------------|
-| `exec` | Execute bash commands in the current environment (ls, cat, grep, etc.) |
+| Tool     | Description                                                             |
+| -------- | ----------------------------------------------------------------------- |
+| `exec`   | Execute bash commands in the current environment (ls, cat, grep, etc.)  |
 | `finish` | Provide final answer and complete the task (for explanations, analysis) |
 
 ### Tool Documentation
 
 The LLM can access detailed tool documentation by reading files from `tools/docs/<tool>.md`. For example:
+
 - `tools/docs/exec.md` - Detailed documentation for the exec tool
 - `tools/docs/finish.md` - Documentation for the finish tool
 
@@ -213,13 +215,14 @@ When adding new tools, create a corresponding `.md` file in `tools/docs/` with u
 
 ### Adding Custom Tools
 
-1. **Update `src/tools/tools.md`** - Add tool to the list
+1. **Update `src/tools/TOOLS.md`** - Add tool to the list
 2. **Create `src/tools/docs/<tool>.md`** - Add detailed documentation
 3. **Edit `src/tools/registry.zig`**:
    - Implement executor function (must return `ToolResult`)
    - Register in `createDefaultRegistry()`
 
 Example tool executor:
+
 ```zig
 fn myToolExecutor(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
     // Your tool logic here
@@ -245,12 +248,12 @@ DAYTONA_API_KEY=           # Optional
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OMNIRLM_BASE_URL` | Base URL for LLM API | `http://127.0.0.1:11435` |
-| `OMNIRLM_API_KEY` | API key for hosted services | (none) |
-| `OMNIRLM_MODEL_NAME` | Model name | `kimi-k2.5` |
-| `DAYTONA_API_KEY` | Daytona sandbox API key | (none) |
+| Variable             | Description                 | Default                  |
+| -------------------- | --------------------------- | ------------------------ |
+| `OMNIRLM_BASE_URL`   | Base URL for LLM API        | `http://127.0.0.1:11435` |
+| `OMNIRLM_API_KEY`    | API key for hosted services | (none)                   |
+| `OMNIRLM_MODEL_NAME` | Model name                  | `kimi-k2.5`              |
+| `DAYTONA_API_KEY`    | Daytona sandbox API key     | (none)                   |
 
 ## Conversation Logging
 

@@ -14,7 +14,8 @@ pub const Tool = struct {
 };
 
 /// Tool executor function type - returns output as string
-pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, argument: []const u8) anyerror!ToolResult;
+/// arguments is an ArrayList of string arguments
+pub const ToolExecutor = *const fn (allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) anyerror!ToolResult;
 
 /// Tool registry - stores all available tools
 pub const ToolRegistry = struct {
@@ -40,11 +41,6 @@ pub const ToolRegistry = struct {
     /// Get a tool by name
     pub fn get(self: *ToolRegistry, name: []const u8) ?Tool {
         return self.tools.get(name);
-    }
-
-    /// Check if a tool exists
-    pub fn has(self: *ToolRegistry, name: []const u8) bool {
-        return self.tools.contains(name);
     }
 
     /// Get list of all tools formatted as "name - description" strings
@@ -92,22 +88,30 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator) !ToolRegistry {
 }
 
 /// Execute bash command and return output
-fn execBash(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
-    if (argument.len == 0) {
+fn execBash(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) !ToolResult {
+    if (arguments.items.len == 0) {
         return ToolResult{
             .output = try allocator.dupe(u8, "Error: No command provided"),
             .success = false,
         };
     }
 
-    std.debug.print("$ {s}\n", .{argument});
+    // Join all arguments into a single command string
+    const cmd_line = try std.mem.join(allocator, " ", arguments.items);
+    defer allocator.free(cmd_line);
+
+    std.debug.print("$ {s}\n", .{cmd_line});
 
     const max_output_bytes: usize = 1024 * 1024;
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "bash", "-c", argument },
+        .argv = &.{ "bash", "-c", cmd_line },
         .max_output_bytes = max_output_bytes,
     });
+    defer {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
+    }
 
     const stdout = result.stdout;
     const stderr = result.stderr;
@@ -141,12 +145,14 @@ fn execBash(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
 }
 
 /// Finish task with final response
-fn finishTask(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
+fn finishTask(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) !ToolResult {
+    const output = try std.mem.join(allocator, " ", arguments.items);
+    defer allocator.free(output);
     // Print the final response
-    std.debug.print("{s}\n", .{argument});
+    std.debug.print("{s}\n", .{output});
 
     return ToolResult{
-        .output = try allocator.dupe(u8, argument),
+        .output = try allocator.dupe(u8, output),
         .success = true,
     };
 }

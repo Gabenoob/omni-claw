@@ -16,29 +16,29 @@ pub const Config = struct {
     model_name: []const u8,
 
     pub fn print(self: Config, writer: anytype) !void {
-        try writer.writeAll("LLM Provider: OpenAI-compatible API\n");
-        try writer.writeAll("Base URL: ");
-        try writer.writeAll(self.base_url);
-        try writer.writeAll("\n");
+        _ = try writer.write("LLM Provider: OpenAI-compatible API\n");
+        _ = try writer.write("Base URL: ");
+        _ = try writer.write(self.base_url);
+        _ = try writer.write("\n");
 
-        try writer.writeAll("API Key: ");
+        _ = try writer.write("API Key: ");
         if (self.api_key) |key| {
             // Mask the API key for security
             if (key.len > 8) {
-                try writer.writeAll(key[0..4]);
-                try writer.writeAll("...");
-                try writer.writeAll(key[key.len - 4 ..]);
+                _ = try writer.write(key[0..4]);
+                _ = try writer.write("...");
+                _ = try writer.write(key[key.len - 4 ..]);
             } else {
-                try writer.writeAll("(set)");
+                _ = try writer.write("(set)");
             }
         } else {
-            try writer.writeAll("(not set)");
+            _ = try writer.write("(not set)");
         }
-        try writer.writeAll("\n");
+        _ = try writer.write("\n");
 
-        try writer.writeAll("Model: ");
-        try writer.writeAll(self.model_name);
-        try writer.writeAll("\n");
+        _ = try writer.write("Model: ");
+        _ = try writer.write(self.model_name);
+        _ = try writer.write("\n");
     }
 
     pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
@@ -107,7 +107,8 @@ pub const Runtime = struct {
         // Check if .omniclaw/.env already exists
         if (self.configExists()) {
             try stdout_file.writeAll("Found existing configuration at .omniclaw/.env\n");
-            const config = try self.loadConfig();
+            var config = try self.loadConfig();
+            defer config.deinit(self.allocator);
             try self.applyConfig(config);
             return;
         }
@@ -127,7 +128,8 @@ pub const Runtime = struct {
                 try self.createOmniclawDir();
                 try self.copyFile(OLD_ENV_FILE_PATH, ENV_FILE_PATH);
                 try stdout_file.writeAll("Copied existing .env to .omniclaw/.env\n");
-                const config = try self.loadConfig();
+                var config = try self.loadConfig();
+                defer config.deinit(self.allocator);
                 try self.applyConfig(config);
             } else {
                 try stdout_file.writeAll("No .env file found in current directory.\n");
@@ -169,16 +171,17 @@ pub const Runtime = struct {
 
         // Step 3: API Key (for hosted APIs)
         var owned_api_key: ?[]u8 = null;
+        var api_key_input: ?[]u8 = null;
+        defer if (api_key_input) |key| self.allocator.free(key);
 
         if (use_hosted) {
             try stdout_file.writeAll("\nAPI key (required for hosted APIs): ");
-            const api_key_input = try readLineAlloc(self.allocator, 1024);
-            defer self.allocator.free(api_key_input);
-            if (api_key_input.len == 0) {
-                self.allocator.free(api_key_input);
+            api_key_input = try readLineAlloc(self.allocator, 1024);
+            if (api_key_input.?.len == 0) {
                 try stdout_file.writeAll("Warning: No API key provided.\n");
             } else {
-                owned_api_key = api_key_input;
+                owned_api_key = api_key_input.?;
+                api_key_input = null; // 转移所有权，防止 defer 释放
             }
         }
 
@@ -392,3 +395,24 @@ pub const Runtime = struct {
         return allocator.dupe(u8, std.mem.trim(u8, raw_line[0..len], " \t\r\n"));
     }
 };
+
+test "show_config" {
+    const config = Config{
+        .base_url = "http://example.com",
+        .api_key = "my-secret-api-key",
+        .model_name = "my_model",
+    };
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+    try config.print(stream.writer());
+    const output = stream.getWritten();
+    try std.testing.expectEqualStrings(
+        \\LLM Provider: OpenAI-compatible API
+        \\Base URL: http://example.com
+        \\API Key: my-s...-key
+        \\Model: my_model
+        \\
+    ,
+        output,
+    );
+}
