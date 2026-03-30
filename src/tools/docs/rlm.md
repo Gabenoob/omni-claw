@@ -27,7 +27,7 @@ Example:
   "tool": "rlm",
   "arguments": [
     "Based on this API reference, explain how buildFinalPrompt works in 3 concise sentences.",
-    "API_referance.md"
+    "API_reference.md"
   ]
 }
 ```
