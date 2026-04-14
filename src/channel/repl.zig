@@ -1,9 +1,16 @@
 const std = @import("std");
 const Agent = @import("../agent/mod.zig").Agent;
+const display_width = @import("display_width.zig");
 
 const MAX_HISTORY = 100;
 const MAX_LINE_LEN = 2048;
 const CONVERSATION_LOG_PATH = @import("../agent/planner.zig").CONVERSATION_LOG_PATH;
+const PROMPT = "> ";
+const DEFAULT_TERMINAL_COLS: usize = 80;
+const ScreenPosition = struct {
+    row: usize,
+    col: usize,
+};
 
 // UTF-8 character state for multi-byte character handling
 const Utf8State = struct {
@@ -73,6 +80,9 @@ pub const Repl = struct {
     line_buf: [MAX_LINE_LEN]u8,
     line_len: usize,
     cursor_pos: usize,
+    terminal_cols: usize,
+    rendered_rows: usize,
+    rendered_cursor_row: usize,
 
     // Command history
     history: std.ArrayList([]const u8),
@@ -87,6 +97,9 @@ pub const Repl = struct {
             .line_buf = undefined,
             .line_len = 0,
             .cursor_pos = 0,
+            .terminal_cols = DEFAULT_TERMINAL_COLS,
+            .rendered_rows = 1,
+            .rendered_cursor_row = 0,
             .history = .empty,
             .history_pos = null,
         };
@@ -103,9 +116,10 @@ pub const Repl = struct {
         // Enable raw mode for terminal
         const original_termios = try enableRawMode(self.stdin);
         defer _ = disableRawMode(self.stdin, original_termios) catch {};
+        self.updateTerminalSize();
 
         while (true) {
-            try self.stdout.writeAll("> ");
+            try self.stdout.writeAll(PROMPT);
             self.resetLine();
             var utf8_state = Utf8State{};
 
@@ -198,6 +212,8 @@ pub const Repl = struct {
     fn resetLine(self: *Repl) void {
         self.line_len = 0;
         self.cursor_pos = 0;
+        self.rendered_rows = 1;
+        self.rendered_cursor_row = 0;
         self.history_pos = null;
     }
 
@@ -269,25 +285,23 @@ pub const Repl = struct {
 
     // Redraw the entire current line with cursor at correct position
     fn redrawLine(self: *Repl) !void {
-        // Move to start of line and clear it, then redraw prompt
-        try self.stdout.writeAll("\r\x1b[K> ");
-        // Write the entire line content
+        self.updateTerminalSize();
+        try self.clearRenderedInput();
+        try self.stdout.writeAll(PROMPT);
         try self.stdout.writeAll(self.line_buf[0..self.line_len]);
 
-        // Now position cursor correctly - go to end then move back
-        // We need to calculate display width of characters after cursor
-        const bytes_after = self.line_len - self.cursor_pos;
-        if (bytes_after > 0) {
-            // To position cursor correctly without knowing display widths,
-            // we use a different approach: go to start and move forward
-            // But that's complex with variable-width characters.
-            // Instead: clear and redraw with cursor at end of visible portion
+        const end_position = self.getScreenPosition(self.line_len);
+        const cursor_position = self.getCursorPosition();
 
-            // Actually, simpler approach: go to start of line (\r),
-            // write prompt + content up to cursor, then we're done
-            try self.stdout.writeAll("\r> ");
-            try self.stdout.writeAll(self.line_buf[0..self.cursor_pos]);
+        if (end_position.row > cursor_position.row) {
+            try self.moveCursorUp(end_position.row - cursor_position.row);
         }
+        if (self.cursor_pos < self.line_len) {
+            try self.moveCursorToColumn(cursor_position.col);
+        }
+
+        self.rendered_rows = self.getRenderedRows(self.line_len);
+        self.rendered_cursor_row = cursor_position.row;
     }
 
     // Get the byte length of the UTF-8 character ending at position 'pos'
@@ -390,22 +404,13 @@ pub const Repl = struct {
 
     fn clearToEnd(self: *Repl) !void {
         self.line_len = self.cursor_pos;
-        try self.stdout.writeAll("\x1b[K");
+        try self.redrawLine();
     }
 
     fn clearLine(self: *Repl) !void {
-        try self.stdout.writeAll("\x1b[2K\r> ");
         self.line_len = 0;
         self.cursor_pos = 0;
-    }
-
-    fn redrawFromCursor(self: *Repl) !void {
-        // Clear from cursor to end
-        try self.stdout.writeAll("\x1b[K");
-        // Write remaining characters
-        if (self.cursor_pos < self.line_len) {
-            try self.stdout.writeAll(self.line_buf[self.cursor_pos..self.line_len]);
-        }
+        try self.redrawLine();
     }
 
     fn handleHistoryUp(self: *Repl) !void {
@@ -437,17 +442,105 @@ pub const Repl = struct {
     }
 
     fn setLine(self: *Repl, line: []const u8) !void {
-        // Clear current line
-        try self.stdout.writeAll("\x1b[2K\r> ");
-
-        // Copy new line
         const len = @min(line.len, MAX_LINE_LEN);
         @memcpy(self.line_buf[0..len], line[0..len]);
         self.line_len = len;
         self.cursor_pos = len;
+        try self.redrawLine();
+    }
 
-        // Write new line
-        try self.stdout.writeAll(self.line_buf[0..len]);
+    fn clearRenderedInput(self: *Repl) !void {
+        if (self.rendered_cursor_row > 0) {
+            try self.moveCursorUp(self.rendered_cursor_row);
+        }
+        try self.stdout.writeAll("\r");
+
+        var row: usize = 0;
+        while (row < self.rendered_rows) : (row += 1) {
+            try self.stdout.writeAll("\x1b[2K");
+            if (row + 1 < self.rendered_rows) {
+                try self.stdout.writeAll("\x1b[1B\r");
+            }
+        }
+
+        if (self.rendered_rows > 1) {
+            try self.moveCursorUp(self.rendered_rows - 1);
+        }
+        try self.stdout.writeAll("\r");
+    }
+
+    fn getRenderedRows(self: *Repl, line_len: usize) usize {
+        const total_cols = self.getDisplayColumns(line_len);
+        return @max(1, (total_cols + self.terminal_cols - 1) / self.terminal_cols);
+    }
+
+    fn getScreenPosition(self: *Repl, cursor_pos: usize) ScreenPosition {
+        const total_cols = self.getDisplayColumns(cursor_pos);
+        return .{
+            .row = (total_cols - 1) / self.terminal_cols,
+            .col = ((total_cols - 1) % self.terminal_cols) + 1,
+        };
+    }
+
+    fn getCursorPosition(self: *Repl) ScreenPosition {
+        if (self.cursor_pos >= self.line_len) {
+            return self.getScreenPosition(self.line_len);
+        }
+
+        const next_cell = self.getDisplayColumns(self.cursor_pos) + 1;
+        return .{
+            .row = (next_cell - 1) / self.terminal_cols,
+            .col = ((next_cell - 1) % self.terminal_cols) + 1,
+        };
+    }
+
+    fn getDisplayColumns(self: *Repl, byte_len: usize) usize {
+        var cols: usize = PROMPT.len;
+        var i: usize = 0;
+        const end = @min(byte_len, self.line_len);
+
+        while (i < end) {
+            const char_len = self.getUtf8CharLen(i);
+            const next = @min(i + char_len, end);
+            cols += self.getCodepointDisplayWidth(self.line_buf[i..next]);
+            i = next;
+        }
+
+        return cols;
+    }
+
+    fn getCodepointDisplayWidth(self: *Repl, utf8_char: []const u8) usize {
+        _ = self;
+        return display_width.codepointDisplayWidth(utf8_char);
+    }
+
+    fn moveCursorUp(self: *Repl, rows: usize) !void {
+        if (rows == 0) return;
+        var buf: [32]u8 = undefined;
+        const seq = try std.fmt.bufPrint(&buf, "\x1b[{d}A", .{rows});
+        try self.stdout.writeAll(seq);
+    }
+
+    fn moveCursorToColumn(self: *Repl, col: usize) !void {
+        var buf: [32]u8 = undefined;
+        const seq = try std.fmt.bufPrint(&buf, "\x1b[{d}G", .{col});
+        try self.stdout.writeAll(seq);
+    }
+
+    fn updateTerminalSize(self: *Repl) void {
+        var winsize: std.posix.winsize = .{
+            .row = 0,
+            .col = 0,
+            .xpixel = 0,
+            .ypixel = 0,
+        };
+
+        const rc = std.posix.system.ioctl(self.stdout.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&winsize));
+        if (std.posix.errno(rc) == .SUCCESS and winsize.col > 0) {
+            self.terminal_cols = winsize.col;
+        } else {
+            self.terminal_cols = DEFAULT_TERMINAL_COLS;
+        }
     }
 };
 
@@ -509,4 +602,73 @@ pub fn run(agent: *Agent) !void {
     defer repl.deinit();
 
     try repl.run();
+}
+
+fn initTestRepl() Repl {
+    var dummy_agent: Agent = undefined;
+    var repl = Repl.init(std.testing.allocator, &dummy_agent);
+    repl.terminal_cols = 10;
+    repl.rendered_rows = 1;
+    repl.rendered_cursor_row = 0;
+    return repl;
+}
+
+fn setTestLine(repl: *Repl, line: []const u8, cursor_pos: usize) void {
+    @memcpy(repl.line_buf[0..line.len], line);
+    repl.line_len = line.len;
+    repl.cursor_pos = cursor_pos;
+}
+
+test "repl display columns account for prompt and chinese width" {
+    var repl = initTestRepl();
+    setTestLine(&repl, "ab你", "ab".len);
+
+    try std.testing.expectEqual(@as(usize, PROMPT.len + 2), repl.getDisplayColumns("ab".len));
+    try std.testing.expectEqual(@as(usize, PROMPT.len + 4), repl.getDisplayColumns(repl.line_len));
+}
+
+test "repl rendered rows wrap on display columns instead of utf8 bytes" {
+    var repl = initTestRepl();
+    repl.terminal_cols = 6;
+    setTestLine(&repl, "你好", "你好".len);
+
+    try std.testing.expectEqual(@as(usize, 1), repl.getRenderedRows("你".len));
+    try std.testing.expectEqual(@as(usize, 1), repl.getRenderedRows(repl.line_len));
+
+    setTestLine(&repl, "你好a", "你好a".len);
+    try std.testing.expectEqual(@as(usize, 2), repl.getRenderedRows(repl.line_len));
+}
+
+test "repl cursor position points at next character and line end stays at trailing cell" {
+    var repl = initTestRepl();
+    setTestLine(&repl, "abc", 1);
+
+    const middle_cursor = repl.getCursorPosition();
+    try std.testing.expectEqual(@as(usize, 0), middle_cursor.row);
+    try std.testing.expectEqual(@as(usize, 4), middle_cursor.col);
+
+    repl.cursor_pos = repl.line_len;
+    const end_cursor = repl.getCursorPosition();
+    const end_position = repl.getScreenPosition(repl.line_len);
+    try std.testing.expectEqual(end_position.row, end_cursor.row);
+    try std.testing.expectEqual(end_position.col, end_cursor.col);
+}
+
+test "repl cursor and screen position stay stable around wrapped chinese boundary" {
+    var repl = initTestRepl();
+    repl.terminal_cols = 4;
+    setTestLine(&repl, "你a", "你".len);
+
+    const screen_position = repl.getScreenPosition(repl.cursor_pos);
+    try std.testing.expectEqual(@as(usize, 0), screen_position.row);
+    try std.testing.expectEqual(@as(usize, 4), screen_position.col);
+
+    const cursor_position = repl.getCursorPosition();
+    try std.testing.expectEqual(@as(usize, 1), cursor_position.row);
+    try std.testing.expectEqual(@as(usize, 1), cursor_position.col);
+
+    repl.cursor_pos = repl.line_len;
+    const end_cursor = repl.getCursorPosition();
+    try std.testing.expectEqual(@as(usize, 1), end_cursor.row);
+    try std.testing.expectEqual(@as(usize, 1), end_cursor.col);
 }
