@@ -3,8 +3,8 @@
     .version = "0.15.2",
     .dependencies = .{
         .Omni_RLM = .{
-            .url = "https://github.com/Open-Model-Initiative/Omni-RLM/archive/refs/tags/v0.1.2.tar.gz",
-            .hash = "Omni_RLM-0.0.0-wUWNVEWLAgAIuSWBgKzZQD1TUwS4dgYWbBM0jdJz0lQd",
+            .url = "https://github.com/Open-Model-Initiative/Omni-RLM/archive/refs/tags/v0.1.3.tar.gz",
+            .hash = "Omni_RLM-0.0.0-wUWNVNgeAgAtqRAniKlWgFrW5AAR4OThnKJlzXa508_S",
         },
     },
     .paths = .{""},

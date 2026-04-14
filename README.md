@@ -11,14 +11,14 @@ Omni-Claw provides an AI agent architecture where:
 
 - User prompts are processed by an Omni-RLM planner via HTTP API
 - The planner selects appropriate tools based on the prompt
-- Tools execute via a tool registry (bash execution via `exec` tool)
+- Tools execute via a tool registry (`exec`, `finish`, and `rlm` tools)
 - Results are returned to the user via an interactive REPL
 
 ## Features
 
 - **LLM-powered recursive planning**: Integrates with OpenAI-compatible APIs (OpenAI, Moonshot, etc.) or local endpoints (Ollama). The planner can execute multiple tools recursively until the task is complete.
 - **Interactive REPL**: Full-featured terminal interface with line editing, history (↑/↓), and UTF-8 support
-- **Tool registry**: Extensible tool system with built-in `exec` and `finish` tools
+- **Tool registry**: Extensible tool system with built-in `exec`, `finish`, and `rlm` tools
 - **Tool documentation lookup**: LLM can read detailed tool documentation from `tools/docs/<tool>.md` files
 - **Conversation logging**: Automatic persistence of conversation history to `logs/conversation.jsonl`
 - **Automatic configuration**: Interactive setup on first run with persistent config storage
@@ -50,7 +50,7 @@ User Input → REPL → Agent.runPrompt() → Planner.initializeConversation()
                                               ↓
                               Load conversation history from logs/conversation.jsonl
                                               ↓
-                                      Read tools/TOOLS.md
+              Read tools/TOOLS.md
                                               ↓
                                       LLM API (Omni-RLM) → JSON Plan
                                               ↓
@@ -187,6 +187,7 @@ Model: kimi-k2.5
 
   • exec - Execute bash commands in the current environment
   • finish - Provide final answer and complete the task
+  • rlm - Process ultra-long material with grounded reasoning
 
 =======================
 
@@ -203,6 +204,7 @@ Omni-Claw uses a tool registry system to manage available tools.
 | -------- | ----------------------------------------------------------------------- |
 | `exec`   | Execute bash commands in the current environment (ls, cat, grep, etc.)  |
 | `finish` | Provide final answer and complete the task (for explanations, analysis) |
+| `rlm`    | Process ultra-long material from a file path with grounded reasoning    |
 
 ### Tool Documentation
 
@@ -210,6 +212,7 @@ The LLM can access detailed tool documentation by reading files from `tools/docs
 
 - `tools/docs/exec.md` - Detailed documentation for the exec tool
 - `tools/docs/finish.md` - Documentation for the finish tool
+- `tools/docs/rlm.md` - Documentation for grounded long-material reasoning
 
 When adding new tools, create a corresponding `.md` file in `tools/docs/` with usage examples and parameter descriptions.
 
@@ -224,9 +227,9 @@ When adding new tools, create a corresponding `.md` file in `tools/docs/` with u
 Example tool executor:
 
 ```zig
-fn myToolExecutor(allocator: std.mem.Allocator, argument: []const u8) !ToolResult {
+fn myToolExecutor(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) !ToolResult {
     // Your tool logic here
-    const output = try std.fmt.allocPrint(allocator, "Result: {s}", .{argument});
+  const output = try std.mem.join(allocator, " ", arguments.items);
     return ToolResult{
         .output = output,
         .success = true,
@@ -269,9 +272,9 @@ The log file uses JSON Lines format (one JSON object per line):
 
 ```jsonl
 {"role":"user","content":"ls -la"}
-{"role":"assistant","content":"{\"tool\":\"exec\",\"argument\":\"ls -la\"}"}
+{"role":"assistant","content":"{\"tool\":\"exec\",\"arguments\":[\"ls -la\"]}"}
 {"role":"user","content":"Tool 'exec' executed. Success: true. Result: ..."}
-{"role":"assistant","content":"{\"tool\":\"finish\",\"argument\":\"Done\"}"}
+{"role":"assistant","content":"{\"tool\":\"finish\",\"arguments\":[\"Done\"]}"}
 ```
 
 ### Log Location
@@ -311,7 +314,7 @@ See `src/omniclaw.zig` for the full public API exports.
 
 ## Dependencies
 
-- [Omni-RLM](https://github.com/Open-Model-Initiative/Omni-RLM) - Reasoning language model interface
+- [Omni-RLM](https://github.com/Open-Model-Initiative/Omni-RLM) `v0.1.3` - Reasoning language model interface
 
 ## License
 

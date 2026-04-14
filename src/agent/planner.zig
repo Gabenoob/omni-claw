@@ -1,7 +1,5 @@
 const std = @import("std");
 const Config = @import("../omniclaw.zig").Config;
-const RLM = @import("omni-rlm").RLM;
-const Log = @import("omni-rlm").RLMLogger;
 
 const ModelHandler = @import("omni-rlm").ModelHandler;
 const Message = @import("omni-rlm").Message;
@@ -100,6 +98,24 @@ const SYSTEM_PROMPT =
     \\* YOU MUST RETURN A TOOL CALL IN EVERY RESPONSE, EVEN IF YOU THINK THE REQUEST IS COMPLETE. DO NOT OMIT TOOL CALLS.
     \\
 ;
+
+const JSON_REPAIR_SYSTEM_PROMPT =
+    \\You are a strict JSON repair assistant for Omni-Claw plan outputs.
+    \\Your job is to repair malformed JSON into a valid JSON object for tool execution.
+    \\
+    \\Output requirements:
+    \\1. Return ONLY one JSON object, no markdown, no explanation.
+    \\2. The JSON schema must be:
+    \\{
+    \\  "tool": "<tool_name>",
+    \\  "arguments": ["<arg1>", "<arg2>"]
+    \\}
+    \\3. "tool" must be a string.
+    \\4. "arguments" must be an array of strings. If missing, use [].
+    \\5. Preserve the original intent as much as possible.
+    \\
+;
+
 fn build_system_prompt(allocator: std.mem.Allocator) ![]const u8 {
     const tools_md = std.fs.cwd().openFile(TOOLS_MD_PATH, .{}) catch |err| {
         return try std.fmt.allocPrint(allocator, "Error loading tools documentation: {any}", .{err});
@@ -116,7 +132,6 @@ fn build_system_prompt(allocator: std.mem.Allocator) ![]const u8 {
 
 pub const Planner = struct {
     allocator: std.mem.Allocator,
-    rlm: ?RLM,
     model: ModelHandler,
     messages: std.ArrayList(Message),
     max_iterations: usize,
@@ -125,7 +140,6 @@ pub const Planner = struct {
     pub fn init(allocator: std.mem.Allocator, max_iterations: usize) Planner {
         return .{
             .allocator = allocator,
-            .rlm = null,
             .model = ModelHandler{},
             .messages = std.ArrayList(Message).empty,
             .max_iterations = max_iterations,
@@ -134,7 +148,6 @@ pub const Planner = struct {
     }
 
     pub fn deinit(self: *Planner) void {
-        if (self.rlm) |*rlm| rlm.deinit();
         for (self.messages.items) |msg| {
             self.allocator.free(msg.role);
             self.allocator.free(msg.content);
@@ -396,6 +409,47 @@ pub const Planner = struct {
         return try extractFirstJsonObject(allocator, trimmed);
     }
 
+    fn repairMalformedPlanJson(self: *Planner, malformed_json: []const u8, parse_error: anyerror) ![]const u8 {
+        var repair_messages = std.ArrayList(Message).empty;
+        defer {
+            for (repair_messages.items) |msg| {
+                self.allocator.free(msg.role);
+                self.allocator.free(msg.content);
+            }
+            repair_messages.deinit(self.allocator);
+        }
+
+        const system_role = try self.allocator.dupe(u8, "system");
+        errdefer self.allocator.free(system_role);
+        const system_content = try self.allocator.dupe(u8, JSON_REPAIR_SYSTEM_PROMPT);
+        errdefer self.allocator.free(system_content);
+        try repair_messages.append(self.allocator, .{
+            .role = system_role,
+            .content = system_content,
+        });
+
+        const user_role = try self.allocator.dupe(u8, "user");
+        errdefer self.allocator.free(user_role);
+        const user_content = try std.fmt.allocPrint(
+            self.allocator,
+            "The following JSON is invalid. Parse error: {any}\n\nInvalid JSON:\n{s}",
+            .{ parse_error, malformed_json },
+        );
+        errdefer self.allocator.free(user_content);
+        try repair_messages.append(self.allocator, .{
+            .role = user_role,
+            .content = user_content,
+        });
+
+        const repair_response = try self.model.make_request(repair_messages, self.allocator, .{
+            .enable_thinking = false,
+            .stream = false,
+        });
+        defer self.allocator.free(repair_response);
+
+        return try sanitizePlanResponse(self.allocator, repair_response);
+    }
+
     // JSON structure for parsing plan response
     const JsonPlan = struct {
         tool: []const u8,
@@ -403,15 +457,26 @@ pub const Planner = struct {
     };
 
     fn parsePlanResponse(self: *Planner, response: []const u8) !ParsedPlanResponse {
-        const sanitized_response = try sanitizePlanResponse(self.allocator, response);
+        var sanitized_response = try sanitizePlanResponse(self.allocator, response);
         errdefer self.allocator.free(sanitized_response);
 
-        const parsed: std.json.Parsed(JsonPlan) = try std.json.parseFromSlice(
+        const parsed: std.json.Parsed(JsonPlan) = std.json.parseFromSlice(
             JsonPlan,
             self.allocator,
             sanitized_response,
             .{},
-        );
+        ) catch |parse_err| blk: {
+            const repaired_response = try self.repairMalformedPlanJson(sanitized_response, parse_err);
+            self.allocator.free(sanitized_response);
+            sanitized_response = repaired_response;
+
+            break :blk try std.json.parseFromSlice(
+                JsonPlan,
+                self.allocator,
+                sanitized_response,
+                .{},
+            );
+        };
         defer parsed.deinit();
 
         const tool = try self.allocator.dupe(u8, parsed.value.tool);
@@ -450,13 +515,13 @@ pub const Planner = struct {
             }
             result.deinit(allocator);
         }
-        
+
         for (list.items) |item| {
             const item_copy = try allocator.dupe(u8, item);
             errdefer allocator.free(item_copy);
             try result.append(allocator, item_copy);
         }
-        
+
         return result;
     }
 
@@ -477,7 +542,7 @@ pub const Planner = struct {
         // Clone sanitized_response since we need to keep it for both messages and log
         const content_copy = try self.allocator.dupe(u8, parsed_response.sanitized_response);
         errdefer self.allocator.free(content_copy);
-        
+
         try self.messages.append(self.allocator, Message{
             .role = assistant_role,
             .content = content_copy,
@@ -489,7 +554,7 @@ pub const Planner = struct {
         const tool_copy = try self.allocator.dupe(u8, parsed_response.plan.tool);
         errdefer self.allocator.free(tool_copy);
         const args_copy = try cloneStringList(self.allocator, parsed_response.plan.arguments);
-        
+
         return Plan{
             .tool = tool_copy,
             .arguments = args_copy,

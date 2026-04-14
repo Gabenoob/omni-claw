@@ -1,4 +1,7 @@
 const std = @import("std");
+const RLM = @import("omni-rlm").RLM;
+const RLMLogger = @import("omni-rlm").RLMLogger;
+const config_env = @import("omni-rlm").config_env;
 
 /// Tool execution result
 pub const ToolResult = struct {
@@ -84,6 +87,13 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator) !ToolRegistry {
         .executor = finishTask,
     });
 
+    // Register rlm tool for grounded reasoning over long materials
+    try registry.register(.{
+        .name = "rlm",
+        .description = "Process ultra-long material with grounded reasoning",
+        .executor = runRlm,
+    });
+
     return registry;
 }
 
@@ -153,6 +163,72 @@ fn finishTask(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)
 
     return ToolResult{
         .output = try allocator.dupe(u8, output),
+        .success = true,
+    };
+}
+
+/// Run Omni-RLM completion with root question + material path
+fn runRlm(allocator: std.mem.Allocator, arguments: std.ArrayList([]const u8)) !ToolResult {
+    if (arguments.items.len < 2) {
+        return ToolResult{
+            .output = try allocator.dupe(u8, "Error: rlm requires 2 arguments: <root_question> <material_path>"),
+            .success = false,
+        };
+    }
+
+    const root_question = arguments.items[0];
+    const material_path = arguments.items[1];
+
+    var backend_cfg = config_env.load_backend_env_config(allocator, ".env") catch |err| {
+        return ToolResult{
+            .output = try std.fmt.allocPrint(allocator, "Error loading .env for rlm tool: {any}", .{err}),
+            .success = false,
+        };
+    };
+    defer backend_cfg.deinit(allocator);
+
+    const logger = RLMLogger.init("./logs", "rlm_tool", allocator) catch |err| {
+        return ToolResult{
+            .output = try std.fmt.allocPrint(allocator, "Error initializing rlm logger: {any}", .{err}),
+            .success = false,
+        };
+    };
+
+    var rlm: RLM = .{
+        .backend = "openai",
+        .backend_kwargs = backend_cfg,
+        .environment = "local",
+        .environment_kwargs = "{}",
+        .max_depth = 1,
+        .material_chunk_size = 8 * 1024,
+        .logger = logger,
+        .allocator = allocator,
+        .max_iterations = 5,
+    };
+
+    rlm.init() catch |err| {
+        return ToolResult{
+            .output = try std.fmt.allocPrint(allocator, "Error initializing rlm runtime: {any}", .{err}),
+            .success = false,
+        };
+    };
+    defer rlm.deinit();
+
+    const completion = rlm.completion(root_question, material_path) catch |err| {
+        return ToolResult{
+            .output = try std.fmt.allocPrint(allocator, "Error running rlm completion: {any}", .{err}),
+            .success = false,
+        };
+    };
+    defer allocator.free(completion.response);
+
+    const output = try std.fmt.allocPrint(allocator, "total time: {d}ms\n{s}", .{
+        completion.execution_time,
+        completion.response,
+    });
+
+    return ToolResult{
+        .output = output,
         .success = true,
     };
 }

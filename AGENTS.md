@@ -8,7 +8,7 @@ Omni-Claw provides an AI agent architecture where:
 
 - User prompts are processed by an Omni-RLM planner via HTTP API
 - The planner selects appropriate tools based on the prompt
-- Tools execute via a tool registry (bash execution via `exec` tool)
+- Tools execute via a tool registry (`exec`, `finish`, and `rlm` tools)
 - Results are returned to the user via an interactive REPL
 
 **Repository**: Standalone Zig project  
@@ -21,10 +21,10 @@ Omni-Claw provides an AI agent architecture where:
 - **Language**: Zig 0.15.1 (pinned via `.mise.toml`)
 - **Build System**: Zig build system (`build.zig` + `build.zig.zon`)
 - **External Dependencies**:
-  - `Omni_RLM` (v0.1.2, pinned via `build.zig.zon`) - Reasoning language model interface from Open-Model-Initiative
+  - `Omni_RLM` (v0.1.3, pinned via `build.zig.zon`) - Reasoning language model interface from Open-Model-Initiative
   - Provides: `RLM`, `RLMLogger`, `ModelHandler`, `Message` types
 - **HTTP Client**: Via Omni-RLM library (OpenAI-compatible API)
-- **Tool Execution**: Direct bash execution via `std.process.Child`
+- **Tool Execution**: Tool registry supports local bash execution (`exec`) and grounded long-material reasoning (`rlm`)
 
 ## Architecture
 
@@ -39,25 +39,26 @@ src/
 │   ├── mod.zig           # Agent coordinator (planner + registry integration)
 │   └── planner.zig       # LLM-based planner with tool selection and conversation logging
 ├── tools/
-│   ├── registry.zig      # Tool registry implementation with exec and finish tools
+│   ├── registry.zig      # Tool registry implementation with exec, finish, and rlm tools
 │   ├── TOOLS.md          # Tool list (index for planner)
 │   └── docs/             # Individual tool documentation
 │       ├── exec.md       # Bash execution tool docs
-│       └── finish.md     # Final answer tool docs
+│       ├── finish.md     # Final answer tool docs
+│       └── rlm.md        # Grounded reasoning tool docs
 └── channel/
     └── repl.zig          # Interactive REPL with line editing and UTF-8 support
 ```
 
 ### Module Organization
 
-| Module               | Purpose            | Key Types/Functions                                                                                     |
-| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| `omniclaw.zig`       | Public API root    | `Runtime`, `Config`, `Agent`, `Planner`, `Plan`, `ToolRegistry`, `Tool`, `ToolExecutor`, `VERSION`      |
-| `core/runtime.zig`   | Core runtime       | `Runtime` (init, deinit, start), `Config`, configuration handling, `.omniclaw/` directory setup         |
-| `agent/mod.zig`      | Agent coordinator  | `Agent` (init, deinit, configureLlmConnection, runPrompt, printConfig, printTools, executeRecursive)    |
-| `agent/planner.zig`  | LLM-based planning | `Planner`, `Plan`, `PlanResult`, `ToolCallRecord`, `getNextPlan`, `addToolResult`, conversation logging |
-| `tools/registry.zig` | Tool definitions   | `ToolRegistry`, `Tool`, `ToolExecutor`, `ToolResult`, `createDefaultRegistry`, `execBash`, `finishTask` |
-| `channel/repl.zig`   | User interface     | `Repl`, `run(agent)`, raw terminal mode, command history, UTF-8 support                                 |
+| Module               | Purpose            | Key Types/Functions                                                                                               |
+| -------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `omniclaw.zig`       | Public API root    | `Runtime`, `Config`, `Agent`, `Planner`, `Plan`, `ToolRegistry`, `Tool`, `ToolExecutor`, `VERSION`                |
+| `core/runtime.zig`   | Core runtime       | `Runtime` (init, deinit, start), `Config`, configuration handling, `.omniclaw/` directory setup                   |
+| `agent/mod.zig`      | Agent coordinator  | `Agent` (init, deinit, configureLlmConnection, runPrompt, printConfig, printTools, executeRecursive)              |
+| `agent/planner.zig`  | LLM-based planning | `Planner`, `Plan`, `PlanResult`, `ToolCallRecord`, `getNextPlan`, `addToolResult`, conversation logging           |
+| `tools/registry.zig` | Tool definitions   | `ToolRegistry`, `Tool`, `ToolExecutor`, `ToolResult`, `createDefaultRegistry`, `execBash`, `finishTask`, `runRlm` |
+| `channel/repl.zig`   | User interface     | `Repl`, `run(agent)`, raw terminal mode, command history, UTF-8 support                                           |
 
 ### Data Flow
 
@@ -66,7 +67,7 @@ User Input → REPL → Agent.runPrompt() → Planner.initializeConversation()
                                               ↓
                               Load conversation history from logs/conversation.jsonl
                                               ↓
-                                      Read tools/TOOLS.md
+              Read tools/TOOLS.md
                                               ↓
                                       LLM API (Omni-RLM) → JSON Plan
                                               ↓
@@ -254,6 +255,7 @@ Model: kimi-k2.5
 
   • exec - Execute bash commands in the current environment
   • finish - Provide final answer and complete the task
+  • rlm - Process ultra-long material with grounded reasoning
 
 =======================
 
@@ -335,6 +337,13 @@ The planner reads `TOOLS.md` to understand available tools, then generates a pla
 - Provides direct answers to questions
 - For explanations, analysis, or conversational responses
 - Full documentation in `src/tools/docs/finish.md`
+
+**`rlm`** - Process ultra-long material with grounded reasoning
+
+- Expects two arguments: `root_question` and `material_path`
+- Uses Omni-RLM runtime to reason over long file content
+- Returns grounded completion output and execution time
+- Full documentation in `src/tools/docs/rlm.md`
 
 ### Tool Registry Structure
 
@@ -459,8 +468,8 @@ Conversations are automatically logged to `logs/conversation.jsonl`:
     .version = "0.15.2",
     .dependencies = .{
         .Omni_RLM = .{
-            .url = "https://github.com/Open-Model-Initiative/Omni-RLM/archive/refs/tags/v0.1.2.tar.gz",
-            .hash = "Omni_RLM-0.0.0-wUWNVEWLAgAIuSWBgKzZQD1TUwS4dgYWbBM0jdJz0lQd",
+            .url = "https://github.com/Open-Model-Initiative/Omni-RLM/archive/refs/tags/v0.1.3.tar.gz",
+            .hash = "Omni_RLM-0.0.0-wUWNVNgeAgAtqRAniKlWgFrW5AAR4OThnKJlzXa508_S",
         },
     },
     .paths = .{""},
@@ -514,7 +523,7 @@ try runtime.start();
 - No persistent memory/storage beyond conversation logs
 - HTTP communication via Omni-RLM library (not native Zig HTTP)
 - Tool execution is direct bash (no WASM sandbox currently active)
-- Limited to two built-in tools: `exec` and `finish`
+- Long-material reasoning depends on valid `.env` backend configuration for `rlm`
 - Max iterations defaults to 1000 (set in `main.zig`)
 - REPL line buffer limited to 2048 bytes
 - Command history limited to 100 entries
@@ -552,7 +561,8 @@ omni-claw/
 │   │   ├── TOOLS.md        # Tool list
 │   │   └── docs/
 │   │       ├── exec.md     # Exec tool docs
-│   │       └── finish.md   # Finish tool docs
+│   │       ├── finish.md   # Finish tool docs
+│   │       └── rlm.md      # RLM tool docs
 │   └── channel/
 │       └── repl.zig        # REPL interface
 └── zig-out/
