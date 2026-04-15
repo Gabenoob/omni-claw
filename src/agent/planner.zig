@@ -63,6 +63,18 @@ const TOOLS_DOCS_DIR = "tools/docs/";
 // Conversation log path
 pub const CONVERSATION_LOG_PATH = "logs/conversation.jsonl";
 
+// Compaction tuning
+pub const KEEP_RECENT: usize = 6;
+pub const COMPACT_THRESHOLD: usize = 40;
+
+const SUMMARY_SYSTEM_PROMPT =
+    \\You are a conversation summarizer. Produce a concise factual summary of the conversation below, preserving:
+    \\1. The user's overall goal and open sub-tasks.
+    \\2. Tools that were run, their arguments, and key results.
+    \\3. Decisions, assumptions, and facts the assistant must remember.
+    \\Output plain text only. Do not emit JSON, tool calls, or <think> tags.
+;
+
 const SYSTEM_PROMPT =
     \\You are omniclaw, an AI agent assistant. Your task is to analyze user requests and select the appropriate tool to execute.
     \\
@@ -580,5 +592,105 @@ pub const Planner = struct {
 
         // Save to conversation log
         try self.appendMessageToLog("user", content);
+    }
+
+    /// Summarize older messages into a single assistant message while keeping
+    /// the system prompt and the last KEEP_RECENT messages verbatim. Archives
+    /// the existing conversation.jsonl to conversation.<timestamp>.jsonl before
+    /// rewriting the log. Returns true if compaction ran, false if the history
+    /// was already short enough to leave alone.
+    pub fn compactMessages(self: *Planner) !bool {
+        const total = self.messages.items.len;
+        if (total <= KEEP_RECENT + 1) return false;
+
+        const middle_start: usize = 1;
+        const middle_end: usize = total - KEEP_RECENT;
+        if (middle_end <= middle_start) return false;
+
+        // Build request for summarizer: fresh system prompt + dupes of the middle slice.
+        var summary_messages = std.ArrayList(Message).empty;
+        defer {
+            for (summary_messages.items) |msg| {
+                self.allocator.free(msg.role);
+                self.allocator.free(msg.content);
+            }
+            summary_messages.deinit(self.allocator);
+        }
+
+        {
+            const role = try self.allocator.dupe(u8, "system");
+            errdefer self.allocator.free(role);
+            const content = try self.allocator.dupe(u8, SUMMARY_SYSTEM_PROMPT);
+            errdefer self.allocator.free(content);
+            try summary_messages.append(self.allocator, Message{ .role = role, .content = content });
+        }
+
+        for (self.messages.items[middle_start..middle_end]) |msg| {
+            const role = try self.allocator.dupe(u8, msg.role);
+            errdefer self.allocator.free(role);
+            const content = try self.allocator.dupe(u8, msg.content);
+            errdefer self.allocator.free(content);
+            try summary_messages.append(self.allocator, Message{ .role = role, .content = content });
+        }
+
+        const raw_summary = try self.model.make_request(summary_messages, self.allocator, .{
+            .enable_thinking = false,
+            .stream = false,
+        });
+        defer self.allocator.free(raw_summary);
+
+        const cleaned = try stripThinkTags(self.allocator, raw_summary);
+        defer self.allocator.free(cleaned);
+
+        const trimmed = std.mem.trim(u8, cleaned, " \t\r\n");
+        const summary_content = try std.fmt.allocPrint(
+            self.allocator,
+            "[Compacted summary]\n{s}",
+            .{trimmed},
+        );
+        errdefer self.allocator.free(summary_content);
+
+        const summary_role = try self.allocator.dupe(u8, "assistant");
+        errdefer self.allocator.free(summary_role);
+
+        // Build the replacement list. We transfer ownership of the system message
+        // and tail entries directly (no re-dupe) and free only the middle slice.
+        var new_messages = std.ArrayList(Message).empty;
+        errdefer new_messages.deinit(self.allocator);
+
+        try new_messages.append(self.allocator, self.messages.items[0]);
+        try new_messages.append(self.allocator, Message{
+            .role = summary_role,
+            .content = summary_content,
+        });
+        for (self.messages.items[middle_end..total]) |msg| {
+            try new_messages.append(self.allocator, msg);
+        }
+
+        // Free the middle slice — its strings are no longer referenced.
+        for (self.messages.items[middle_start..middle_end]) |msg| {
+            self.allocator.free(msg.role);
+            self.allocator.free(msg.content);
+        }
+
+        // Swap in the compacted list.
+        self.messages.deinit(self.allocator);
+        self.messages = new_messages;
+
+        // Archive the old log so the pre-compact history survives on disk.
+        const timestamp = std.time.timestamp();
+        const archive_path = try std.fmt.allocPrint(
+            self.allocator,
+            "logs/conversation.{d}.jsonl",
+            .{timestamp},
+        );
+        defer self.allocator.free(archive_path);
+
+        std.fs.cwd().rename(self.conversation_log_path, archive_path) catch |err| {
+            if (err != error.FileNotFound) return err;
+        };
+
+        try self.saveConversationLog();
+        return true;
     }
 };

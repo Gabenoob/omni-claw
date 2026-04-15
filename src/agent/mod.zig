@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Planner = @import("planner.zig").Planner;
 const PlanResult = @import("planner.zig").PlanResult;
+const COMPACT_THRESHOLD = @import("planner.zig").COMPACT_THRESHOLD;
 const ToolRegistry = @import("../tools/registry.zig").ToolRegistry;
 const ToolResult = @import("../tools/registry.zig").ToolResult;
 const createDefaultRegistry = @import("../tools/registry.zig").createDefaultRegistry;
@@ -71,6 +72,61 @@ pub const Agent = struct {
         }
 
         try stdout_file.writeAll("=============================\n\n");
+    }
+
+    pub fn printContextUsage(self: *Agent) !void {
+        const stdout_file = std.fs.File.stdout();
+
+        var system_count: usize = 0;
+        var user_count: usize = 0;
+        var assistant_count: usize = 0;
+        var other_count: usize = 0;
+        var total_bytes: usize = 0;
+
+        for (self.planner.messages.items) |msg| {
+            total_bytes += msg.content.len;
+            if (std.mem.eql(u8, msg.role, "system")) {
+                system_count += 1;
+            } else if (std.mem.eql(u8, msg.role, "user")) {
+                user_count += 1;
+            } else if (std.mem.eql(u8, msg.role, "assistant")) {
+                assistant_count += 1;
+            } else {
+                other_count += 1;
+            }
+        }
+
+        const total_msgs = self.planner.messages.items.len;
+        const approx_tokens = total_bytes / 4;
+        const pct: usize = if (COMPACT_THRESHOLD == 0) 0 else (total_msgs * 100) / COMPACT_THRESHOLD;
+
+        var buf: [512]u8 = undefined;
+        const line = try std.fmt.bufPrint(&buf,
+            "\n=== Context Usage ===\n" ++
+            "Messages: {d} (system={d}, user={d}, assistant={d}, other={d})\n" ++
+            "Content bytes: {d} (~{d} tokens)\n" ++
+            "Auto-compact threshold: {d} messages ({d}% used)\n" ++
+            "Keep-recent on compact: last {d} messages\n" ++
+            "=====================\n\n",
+            .{
+                total_msgs, system_count, user_count, assistant_count, other_count,
+                total_bytes, approx_tokens,
+                COMPACT_THRESHOLD, pct,
+                @import("planner.zig").KEEP_RECENT,
+            },
+        );
+        try stdout_file.writeAll(line);
+    }
+
+    pub fn compactHistory(self: *Agent) !void {
+        const stdout_file = std.fs.File.stdout();
+        try stdout_file.writeAll("\n=== Compacting conversation... ===\n");
+        const ran = try self.planner.compactMessages();
+        if (ran) {
+            try stdout_file.writeAll("Compaction complete. Old log archived.\n\n");
+        } else {
+            try stdout_file.writeAll("Nothing to compact yet.\n\n");
+        }
     }
 
     pub fn printTools(self: *Agent) !void {
@@ -149,6 +205,14 @@ pub const Agent = struct {
         const max_iterations = self.planner.max_iterations;
 
         while (iteration < max_iterations) : (iteration += 1) {
+            // Auto-compact when history grows past the threshold so the next
+            // LLM request sees a shrunken context.
+            if (self.planner.messages.items.len > COMPACT_THRESHOLD) {
+                _ = self.planner.compactMessages() catch |err| {
+                    std.debug.print("Auto-compaction failed: {any} (continuing)\n", .{err});
+                };
+            }
+
             // Get next plan from LLM
             var plan = try self.planner.getNextPlan();
             defer plan.deinit(self.allocator);

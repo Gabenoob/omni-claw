@@ -204,9 +204,35 @@ pub const Repl = struct {
                 try self.agent.printTools();
                 continue;
             }
+            if (std.mem.eql(u8, line, "/compact")) {
+                try self.agent.compactHistory();
+                continue;
+            }
+            if (std.mem.eql(u8, line, "/context")) {
+                try self.agent.printContextUsage();
+                continue;
+            }
+            if (std.mem.eql(u8, line, "/help")) {
+                try self.printHelp();
+                continue;
+            }
 
             try self.agent.runPrompt(line);
         }
+    }
+
+    fn printHelp(self: *Repl) !void {
+        const help_text =
+            "\n=== Available Commands ===\n" ++
+            "  /help      Show this list of commands\n" ++
+            "  /config    Show the current LLM configuration\n" ++
+            "  /tools     List registered tools\n" ++
+            "  /context   Show current conversation context usage\n" ++
+            "  /compact   Summarize older messages to shrink context\n" ++
+            "  /exit, /quit  Quit the REPL\n" ++
+            "Any other input is sent to the agent as a prompt.\n" ++
+            "==========================\n\n";
+        try self.stdout.writeAll(help_text);
     }
 
     fn resetLine(self: *Repl) void {
