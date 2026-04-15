@@ -148,6 +148,7 @@ pub const Planner = struct {
     messages: std.ArrayList(Message),
     max_iterations: usize,
     conversation_log_path: []const u8,
+    enable_thinking: bool,
 
     pub fn init(allocator: std.mem.Allocator, max_iterations: usize) Planner {
         return .{
@@ -156,6 +157,7 @@ pub const Planner = struct {
             .messages = std.ArrayList(Message).empty,
             .max_iterations = max_iterations,
             .conversation_log_path = CONVERSATION_LOG_PATH,
+            .enable_thinking = false,
         };
     }
 
@@ -173,6 +175,7 @@ pub const Planner = struct {
             .api_key = config.api_key orelse "",
             .model_name = config.model_name,
         };
+        self.enable_thinking = config.enable_thinking;
     }
 
     /// Initialize the conversation with system prompt and user input
@@ -540,7 +543,7 @@ pub const Planner = struct {
     /// Get next plan from LLM (single iteration)
     pub fn getNextPlan(self: *Planner) !Plan {
         const response = try self.model.make_request(self.messages, self.allocator, .{
-            .enable_thinking = false,
+            .enable_thinking = self.enable_thinking,
             .stream = false,
         });
         defer self.allocator.free(response);

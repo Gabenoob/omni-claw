@@ -55,6 +55,7 @@ pub const Agent = struct {
             .base_url = base_url,
             .api_key = api_key,
             .model_name = model_name,
+            .enable_thinking = config.enable_thinking,
         };
 
         try self.planner.setConnectionConfig(self.config.?);

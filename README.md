@@ -125,6 +125,8 @@ Model name:
   Default: gpt-4
   Enter model (or press Enter for default): kimi-k2.5
 
+Enable thinking? [y/N]: n
+
 
 ✓ Configuration saved to .omniclaw/.env
 ```
@@ -136,7 +138,7 @@ Configuration is stored in `.omniclaw/.env` and persists across sessions.
 | Command            | Description                                                      |
 | ------------------ | ---------------------------------------------------------------- |
 | `<prompt>`         | Any text is sent to the planner for tool selection and execution |
-| `/config`          | Display current LLM configuration (API keys masked)              |
+| `/config`          | Display or edit current LLM configuration (API keys masked)      |
 | `/tools`           | Display list of available tools                                  |
 | `/exit` or `/quit` | Exit the REPL                                                    |
 
@@ -179,6 +181,7 @@ LLM Provider: OpenAI-compatible API
 Base URL: https://api.moonshot.cn/v1
 API Key: sk-EF...DuO
 Model: kimi-k2.5
+Thinking: off
 =============================
 
 > /tools
@@ -246,17 +249,17 @@ Configuration is stored in `.omniclaw/.env`:
 OMNIRLM_BASE_URL=https://api.moonshot.cn/v1
 OMNIRLM_API_KEY=sk-your-key
 OMNIRLM_MODEL_NAME=kimi-k2.5
-DAYTONA_API_KEY=           # Optional
+OMNIRLM_ENABLE_THINKING=false
 ```
 
 ### Environment Variables
 
-| Variable             | Description                 | Default                  |
-| -------------------- | --------------------------- | ------------------------ |
-| `OMNIRLM_BASE_URL`   | Base URL for LLM API        | `http://127.0.0.1:11435` |
-| `OMNIRLM_API_KEY`    | API key for hosted services | (none)                   |
-| `OMNIRLM_MODEL_NAME` | Model name                  | `kimi-k2.5`              |
-| `DAYTONA_API_KEY`    | Daytona sandbox API key     | (none)                   |
+| Variable                    | Description                 | Default                  |
+| --------------------------- | --------------------------- | ------------------------ |
+| `OMNIRLM_BASE_URL`          | Base URL for LLM API        | `http://127.0.0.1:11435` |
+| `OMNIRLM_API_KEY`           | API key for hosted services | (none)                   |
+| `OMNIRLM_MODEL_NAME`        | Model name                  | `kimi-k2.5`              |
+| `OMNIRLM_ENABLE_THINKING`   | Enable model thinking mode  | `false`                  |
 
 ## Conversation Logging
 

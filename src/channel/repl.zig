@@ -1,6 +1,7 @@
 const std = @import("std");
 const Agent = @import("../agent/mod.zig").Agent;
 const display_width = @import("display_width.zig");
+const runtime = @import("../core/runtime.zig");
 
 const MAX_HISTORY = 100;
 const MAX_LINE_LEN = 2048;
@@ -88,6 +89,9 @@ pub const Repl = struct {
     history: std.ArrayList([]const u8),
     history_pos: ?usize,
 
+    // Saved pre-raw termios so handlers can temporarily restore canonical mode.
+    original_termios: std.posix.termios,
+
     pub fn init(allocator: std.mem.Allocator, agent: *Agent) Repl {
         return .{
             .allocator = allocator,
@@ -102,6 +106,7 @@ pub const Repl = struct {
             .rendered_cursor_row = 0,
             .history = .empty,
             .history_pos = null,
+            .original_termios = undefined,
         };
     }
 
@@ -115,6 +120,7 @@ pub const Repl = struct {
     pub fn run(self: *Repl) !void {
         // Enable raw mode for terminal
         const original_termios = try enableRawMode(self.stdin);
+        self.original_termios = original_termios;
         defer _ = disableRawMode(self.stdin, original_termios) catch {};
         self.updateTerminalSize();
 
@@ -197,7 +203,7 @@ pub const Repl = struct {
             // Handle built-in commands
             if (std.mem.eql(u8, line, "/exit") or std.mem.eql(u8, line, "/quit")) return;
             if (std.mem.eql(u8, line, "/config")) {
-                try self.agent.printConfig();
+                try self.handleConfigCommand();
                 continue;
             }
             if (std.mem.eql(u8, line, "/tools")) {
@@ -225,7 +231,7 @@ pub const Repl = struct {
         const help_text =
             "\n=== Available Commands ===\n" ++
             "  /help      Show this list of commands\n" ++
-            "  /config    Show the current LLM configuration\n" ++
+            "  /config    Show or modify the current LLM configuration\n" ++
             "  /tools     List registered tools\n" ++
             "  /context   Show current conversation context usage\n" ++
             "  /compact   Summarize older messages to shrink context\n" ++
@@ -233,6 +239,30 @@ pub const Repl = struct {
             "Any other input is sent to the agent as a prompt.\n" ++
             "==========================\n\n";
         try self.stdout.writeAll(help_text);
+    }
+
+    fn handleConfigCommand(self: *Repl) !void {
+        try self.agent.printConfig();
+
+        const current = self.agent.config orelse {
+            try self.stdout.writeAll("Configuration not loaded; cannot edit.\n\n");
+            return;
+        };
+
+        // editConfigInteractive uses readLineAlloc, which needs canonical mode.
+        try disableRawMode(self.stdin, self.original_termios);
+        var new_cfg = runtime.editConfigInteractive(self.allocator, current) catch |err| {
+            _ = enableRawMode(self.stdin) catch {};
+            return err;
+        };
+        _ = enableRawMode(self.stdin) catch {};
+        defer new_cfg.deinit(self.allocator);
+
+        // CWD is already `.omniclaw/` inside the REPL (see Runtime.start), so
+        // the .env lives in the current directory.
+        try runtime.saveConfig(".env", new_cfg);
+        try self.agent.configureLlmConnection(new_cfg);
+        try self.stdout.writeAll("\n✓ Configuration updated.\n\n");
     }
 
     fn resetLine(self: *Repl) void {
@@ -619,10 +649,6 @@ fn deleteConversationLog() !void {
 pub fn run(agent: *Agent) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-
-    defer deleteConversationLog() catch |err| {
-        std.debug.print("Warning: failed to delete {s}: {any}\n", .{ CONVERSATION_LOG_PATH, err });
-    };
 
     var repl = Repl.init(gpa.allocator(), agent);
     defer repl.deinit();
